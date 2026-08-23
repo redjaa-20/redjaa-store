@@ -1713,7 +1713,7 @@ async def beli_to_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 📦 DAFTAR PRODUK (Fetch dari API)
 # ================================================================
 async def daftar_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Fetch daftar produk dari ProdSeller API dan tampilkan sebagai inline buttons."""
+    """Fetch daftar produk dari ProdSeller API dan tampilkan sebagai daftar bernomor + tombol angka."""
     loading = await update.message.reply_text("⏳ Mengambil daftar produk...")
 
     result = api.get_products()
@@ -1731,77 +1731,103 @@ async def daftar_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await loading.edit_text("📭 Tidak ada produk tersedia saat ini.")
         return
 
-    # Simpan daftar produk ke user_data untuk referensi callback
+    # Simpan daftar produk ke user_data untuk referensi callback (index-based)
     context.user_data["produk_list"] = products
 
+    # Bangun teks daftar produk bernomor
+    text = "📦 <b>Daftar Produk</b>\n\n"
     buttons = []
-    for p in products:
-        pid = p.get("id", "")
+    button_row = []
+
+    for i, p in enumerate(products):
         nama = p.get("name", p.get("productName", "Tanpa Nama"))
         harga = p.get("price", p.get("amount", "-"))
         stok = p.get("stock", p.get("inStock", "-"))
 
-        # Tentukan status ready/habis
+        # Tentukan stok & status
         if isinstance(stok, (int, float)):
-            ready = "🟢 Ready" if stok > 0 else "🔴 Habis"
+            stok_val = int(stok)
+            stok_str = str(stok_val)
+            ready = "🟢" if stok_val > 0 else "🔴"
         elif isinstance(stok, str) and stok.isdigit():
-            ready = "🟢 Ready" if int(stok) > 0 else "🔴 Habis"
+            stok_val = int(stok)
+            stok_str = str(stok_val)
+            ready = "🟢" if stok_val > 0 else "🔴"
         else:
-            ready = "🟢 Ready"
+            stok_str = str(stok) if stok != "-" else "?"
+            ready = "🟢"
 
-        # Format label tombol: "Nama - Rp harga - Ready/Habis"
+        # Format harga IDR
         if harga != "-":
             harga_idr = currency.usd_to_idr(harga)
             harga_str = currency.format_idr(harga_idr)
         else:
-            harga_str = ""
-        label_parts = [nama]
-        if harga_str:
-            label_parts.append(harga_str)
-        label_parts.append(ready)
-        label = " • ".join(label_parts)
+            harga_str = "Rp -"
 
-        # callback_data maksimal 64 byte; gunakan index produk
-        buttons.append([InlineKeyboardButton(label, callback_data=f"prod_{pid}")])
+        # Format baris: "1. NamaProduk - {stok} - Rp {harga} 🟢/🔴"
+        text += f"<b>{i + 1}.</b> {nama} - {stok_str} - {harga_str} {ready}\n"
+
+        # Tombol angka (callback_data pakai index)
+        button_row.append(InlineKeyboardButton(str(i + 1), callback_data=f"prod_{i}"))
+        if len(button_row) == 3:
+            buttons.append(button_row)
+            button_row = []
+
+    # Sisa tombol di baris terakhir
+    if button_row:
+        buttons.append(button_row)
 
     kb = InlineKeyboardMarkup(buttons)
 
-    await loading.edit_text(
-        "📦 <b>Daftar Produk</b>\n\n"
-        "Klik produk untuk membeli:",
-        parse_mode="HTML",
-        reply_markup=kb,
-    )
+    text += "\n<i>Klik nomor produk untuk membeli.</i>"
+
+    await loading.edit_text(text, parse_mode="HTML", reply_markup=kb)
 
 async def pilih_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Callback: user klik produk dari daftar → minta jumlah."""
+    """Callback: user klik nomor produk dari daftar → minta jumlah."""
     query = update.callback_query
     await query.answer()
 
-    pid = query.data.replace("prod_", "")
+    # callback_data sekarang berisi index: prod_0, prod_1, dst.
+    idx_str = query.data.replace("prod_", "")
 
-    # Cari produk di user_data
+    # Cari produk di user_data berdasarkan index
     products = context.user_data.get("produk_list", [])
     produk = None
-    for p in products:
-        if p.get("id") == pid:
-            produk = p
-            break
 
+    if idx_str.isdigit():
+        idx = int(idx_str)
+        if 0 <= idx < len(products):
+            produk = products[idx]
+
+    # Fallback: jika index tidak valid, coba cari berdasarkan product ID (backward compat)
     if not produk:
-        # Fallback: fetch ulang dari API
+        for p in products:
+            if p.get("id") == idx_str:
+                produk = p
+                break
+
+    # Fallback terakhir: fetch ulang dari API
+    if not produk:
         result = api.get_products()
         if "error" not in result:
             all_products = result if isinstance(result, list) else result.get("data", result.get("products", []))
-            for p in all_products:
-                if p.get("id") == pid:
-                    produk = p
-                    break
+            if idx_str.isdigit():
+                idx = int(idx_str)
+                if 0 <= idx < len(all_products):
+                    produk = all_products[idx]
+                    context.user_data["produk_list"] = all_products
+            else:
+                for p in all_products:
+                    if p.get("id") == idx_str:
+                        produk = p
+                        break
 
     if not produk:
         await query.edit_message_text("❌ Produk tidak ditemukan. Coba lagi.")
         return
 
+    pid = produk.get("id", "")
     nama = produk.get("name", produk.get("productName", "Tanpa Nama"))
     harga = produk.get("price", produk.get("amount", "-"))
 
