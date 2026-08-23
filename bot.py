@@ -159,7 +159,7 @@ def produk_nomor_keyboard(products: list):
     row = []
     for i in range(len(products)):
         row.append(KeyboardButton(str(i + 1)))
-        if len(row) == 3:
+        if len(row) == 5:
             rows.append(row)
             row = []
     # Sisa tombol + Batal di baris terakhir
