@@ -150,6 +150,24 @@ def jumlah_keyboard():
         resize_keyboard=True,
     )
 
+def produk_nomor_keyboard(products: list):
+    """
+    Keyboard ReplyKeyboard berisi tombol angka 1..N untuk daftar produk.
+    Disusun 3 per baris, baris terakhir ditambah tombol ❌ Batal.
+    """
+    rows = []
+    row = []
+    for i in range(len(products)):
+        row.append(KeyboardButton(str(i + 1)))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    # Sisa tombol + Batal di baris terakhir
+    row.append(KeyboardButton("❌ Batal"))
+    rows.append(row)
+
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+
 def get_keyboard(user_id: int):
     """Ambil keyboard sesuai role user."""
     if is_admin(user_id):
@@ -1329,6 +1347,7 @@ async def beli_batal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("selected_product_id", None)
     context.user_data.pop("selected_product_name", None)
     context.user_data.pop("produk_list", None)
+    context.user_data.pop("awaiting_produk_nomor", None)
 
     # Hapus pesan QRIS agar tidak bisa di-scan setelah dibatalkan
     qris_msg_id = context.user_data.pop("qris_message_id", None)
@@ -1713,7 +1732,7 @@ async def beli_to_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 📦 DAFTAR PRODUK (Fetch dari API)
 # ================================================================
 async def daftar_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Fetch daftar produk dari ProdSeller API dan tampilkan sebagai daftar bernomor + tombol angka."""
+    """Fetch daftar produk dari ProdSeller API dan tampilkan sebagai daftar bernomor + keyboard angka."""
     loading = await update.message.reply_text("⏳ Mengambil daftar produk...")
 
     result = api.get_products()
@@ -1733,12 +1752,11 @@ async def daftar_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Simpan daftar produk ke user_data untuk referensi callback (index-based)
     context.user_data["produk_list"] = products
+    # Tandai state: user sedang memilih nomor produk
+    context.user_data["awaiting_produk_nomor"] = True
 
     # Bangun teks daftar produk bernomor
     text = "📦 <b>Daftar Produk</b>\n\n"
-    buttons = []
-    button_row = []
-
     for i, p in enumerate(products):
         nama = p.get("name", p.get("productName", "Tanpa Nama"))
         harga = p.get("price", p.get("amount", "-"))
@@ -1767,65 +1785,44 @@ async def daftar_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Format baris: "1. NamaProduk - {stok} - Rp {harga} 🟢/🔴"
         text += f"<b>{i + 1}.</b> {nama} - {stok_str} - {harga_str} {ready}\n"
 
-        # Tombol angka (callback_data pakai index)
-        button_row.append(InlineKeyboardButton(str(i + 1), callback_data=f"prod_{i}"))
-        if len(button_row) == 3:
-            buttons.append(button_row)
-            button_row = []
+    text += "\n<i>Ketuk nomor produk di keyboard bawah untuk membeli.</i>"
 
-    # Sisa tombol di baris terakhir
-    if button_row:
-        buttons.append(button_row)
+    # Keyboard ReplyKeyboard dengan tombol angka 1..N
+    kb = produk_nomor_keyboard(products)
 
-    kb = InlineKeyboardMarkup(buttons)
-
-    text += "\n<i>Klik nomor produk untuk membeli.</i>"
-
-    await loading.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await loading.delete()
+    await update.message.reply_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=kb,
+    )
 
 async def pilih_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Callback: user klik nomor produk dari daftar → minta jumlah."""
-    query = update.callback_query
-    await query.answer()
+    """User ketuk nomor produk di keyboard → cari produk → minta jumlah."""
+    uid = update.effective_user.id
 
-    # callback_data sekarang berisi index: prod_0, prod_1, dst.
-    idx_str = query.data.replace("prod_", "")
+    # Hanya proses jika sedang dalam state memilih nomor produk
+    if not context.user_data.get("awaiting_produk_nomor"):
+        return  # Bukan dalam state pilih produk → lewati
 
-    # Cari produk di user_data berdasarkan index
-    products = context.user_data.get("produk_list", [])
-    produk = None
+    text = update.message.text.strip()
 
-    if idx_str.isdigit():
-        idx = int(idx_str)
-        if 0 <= idx < len(products):
-            produk = products[idx]
-
-    # Fallback: jika index tidak valid, coba cari berdasarkan product ID (backward compat)
-    if not produk:
-        for p in products:
-            if p.get("id") == idx_str:
-                produk = p
-                break
-
-    # Fallback terakhir: fetch ulang dari API
-    if not produk:
-        result = api.get_products()
-        if "error" not in result:
-            all_products = result if isinstance(result, list) else result.get("data", result.get("products", []))
-            if idx_str.isdigit():
-                idx = int(idx_str)
-                if 0 <= idx < len(all_products):
-                    produk = all_products[idx]
-                    context.user_data["produk_list"] = all_products
-            else:
-                for p in all_products:
-                    if p.get("id") == idx_str:
-                        produk = p
-                        break
-
-    if not produk:
-        await query.edit_message_text("❌ Produk tidak ditemukan. Coba lagi.")
+    # Validasi: harus angka
+    if not text.isdigit():
+        await update.message.reply_text("❌ Masukkan nomor produk yang valid dari daftar.")
         return
+
+    idx = int(text) - 1  # Convert ke 0-based index
+
+    products = context.user_data.get("produk_list", [])
+
+    if idx < 0 or idx >= len(products):
+        await update.message.reply_text(
+            f"❌ Nomor tidak valid. Pilih 1 sampai {len(products)}."
+        )
+        return
+
+    produk = products[idx]
 
     pid = produk.get("id", "")
     nama = produk.get("name", produk.get("productName", "Tanpa Nama"))
@@ -1834,8 +1831,8 @@ async def pilih_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Simpan produk yang dipilih ke user_data
     context.user_data["selected_product_id"] = pid
     context.user_data["selected_product_name"] = nama
-
-    uid = update.effective_user.id
+    # Bersihkan state pilih nomor produk
+    context.user_data.pop("awaiting_produk_nomor", None)
 
     # Ambil harga jual sesuai role
     if is_admin(uid):
@@ -1870,15 +1867,8 @@ async def pilih_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"<i>(ketik angka, contoh: 1, 5, 10)</i>"
         )
 
-    # Hapus pesan daftar produk
-    try:
-        await query.message.delete()
-    except Exception:
-        pass
-
-    await context.bot.send_message(
-        chat_id=uid,
-        text=info,
+    await update.message.reply_text(
+        info,
         parse_mode="HTML",
         reply_markup=jumlah_keyboard(),
     )
@@ -1962,7 +1952,7 @@ async def main():
         entry_points=[
             MessageHandler(filters.Regex("^🛒 Gemini$"), beli_start),
             CommandHandler("beli", beli_start),
-            CallbackQueryHandler(pilih_produk, pattern="^prod_"),
+            MessageHandler(filters.Regex("^[0-9]+$"), pilih_produk),
         ],
         states={
             INPUT_QTY: [
