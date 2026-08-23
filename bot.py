@@ -1782,8 +1782,8 @@ async def daftar_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             harga_str = "Rp -"
 
-        # Format baris: "1. NamaProduk - {stok} - Rp {harga} 🟢/🔴"
-        text += f"<b>{i + 1}.</b> {nama} - {stok_str} - {harga_str} {ready}\n"
+        # Format baris: "[1] Nama ( stok )"
+        text += f"<b>[{i + 1}]</b> {nama} ( {stok_str} )\n"
 
     text += "\n<i>Ketuk nomor produk di keyboard bawah untuk membeli.</i>"
 
