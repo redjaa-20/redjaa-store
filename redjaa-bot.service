@@ -1,0 +1,19 @@
+[Unit]
+Description=Redjaa Digital - QuantumVault Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Ganti 'ubuntu' dengan username VPS Anda jika berbeda
+User=ubuntu
+WorkingDirectory=/home/ubuntu/redjaa-digital
+ExecStart=/home/ubuntu/redjaa-digital/venv/bin/python bot.py
+Restart=always
+RestartSec=5
+# Log ke journald
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
