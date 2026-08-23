@@ -150,21 +150,41 @@ def jumlah_keyboard():
         resize_keyboard=True,
     )
 
-def produk_nomor_keyboard(products: list):
+PRODUK_PER_PAGE = 10
+
+def produk_nomor_keyboard(total_products: int, page: int = 0):
     """
-    Keyboard ReplyKeyboard berisi tombol angka 1..N untuk daftar produk.
-    Disusun 3 per baris, baris terakhir ditambah tombol ❌ Batal.
+    Keyboard ReplyKeyboard berisi tombol angka untuk daftar produk per halaman.
+    Disusun 5 per baris, baris terakhir ditambah tombol Prev/Next dan Kembali ke Menu Utama.
     """
+    per_page = PRODUK_PER_PAGE
+    start = page * per_page       # 0-based index
+    end = min(start + per_page, total_products)
+    total_pages = (total_products + per_page - 1) // per_page
+
     rows = []
     row = []
-    for i in range(len(products)):
+    for i in range(start, end):
+        # Nomor tampil = index global + 1
         row.append(KeyboardButton(str(i + 1)))
         if len(row) == 5:
             rows.append(row)
             row = []
-    # Sisa tombol + Batal di baris terakhir
-    row.append(KeyboardButton("❌ Batal"))
-    rows.append(row)
+    # Sisa tombol di baris terakhir
+    if row:
+        rows.append(row)
+
+    # Baris Prev / Next (hanya tampilkan jika relevan)
+    nav_row = []
+    if page > 0:
+        nav_row.append(KeyboardButton("⬅️ Prev"))
+    if page < total_pages - 1:
+        nav_row.append(KeyboardButton("➡️ Next"))
+    if nav_row:
+        rows.append(nav_row)
+
+    # Baris Kembali ke Menu Utama
+    rows.append([KeyboardButton("🏠 Kembali ke Menu Utama")])
 
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
@@ -1348,6 +1368,7 @@ async def beli_batal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("selected_product_name", None)
     context.user_data.pop("produk_list", None)
     context.user_data.pop("awaiting_produk_nomor", None)
+    context.user_data.pop("produk_page", None)
 
     # Hapus pesan QRIS agar tidak bisa di-scan setelah dibatalkan
     qris_msg_id = context.user_data.pop("qris_message_id", None)
@@ -1732,7 +1753,7 @@ async def beli_to_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 📦 DAFTAR PRODUK (Fetch dari API)
 # ================================================================
 async def daftar_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Fetch daftar produk dari ProdSeller API dan tampilkan sebagai daftar bernomor + keyboard angka."""
+    """Fetch daftar produk dari ProdSeller API dan tampilkan sebagai daftar bernomor + keyboard angka (pagination)."""
     loading = await update.message.reply_text("⏳ Mengambil daftar produk...")
 
     result = api.get_products()
@@ -1750,51 +1771,87 @@ async def daftar_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await loading.edit_text("📭 Tidak ada produk tersedia saat ini.")
         return
 
-    # Simpan daftar produk ke user_data untuk referensi callback (index-based)
+    # Simpan daftar produk ke user_data
     context.user_data["produk_list"] = products
-    # Tandai state: user sedang memilih nomor produk
     context.user_data["awaiting_produk_nomor"] = True
-
-    # Bangun teks daftar produk bernomor
-    text = "📦 <b>Daftar Produk</b>\n\n"
-    for i, p in enumerate(products):
-        nama = p.get("name", p.get("productName", "Tanpa Nama"))
-        harga = p.get("price", p.get("amount", "-"))
-        stok = p.get("stock", p.get("inStock", "-"))
-
-        # Tentukan stok & status
-        if isinstance(stok, (int, float)):
-            stok_val = int(stok)
-            stok_str = str(stok_val)
-            ready = "🟢" if stok_val > 0 else "🔴"
-        elif isinstance(stok, str) and stok.isdigit():
-            stok_val = int(stok)
-            stok_str = str(stok_val)
-            ready = "🟢" if stok_val > 0 else "🔴"
-        else:
-            stok_str = str(stok) if stok != "-" else "?"
-            ready = "🟢"
-
-        # Format harga IDR
-        if harga != "-":
-            harga_idr = currency.usd_to_idr(harga)
-            harga_str = currency.format_idr(harga_idr)
-        else:
-            harga_str = "Rp -"
-
-        # Format baris: "[1] Nama ( stok )"
-        text += f"<b>[{i + 1}]</b> {nama} ( {stok_str} )\n"
-
-    text += "\n<i>Ketuk nomor produk di keyboard bawah untuk membeli.</i>"
-
-    # Keyboard ReplyKeyboard dengan tombol angka 1..N
-    kb = produk_nomor_keyboard(products)
+    context.user_data["produk_page"] = 0  # mulai dari halaman 1 (index 0)
 
     await loading.delete()
+    await _tampilkan_halaman_produk(update, context, page=0)
+
+async def _tampilkan_halaman_produk(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int):
+    """Tampilkan satu halaman daftar produk (maksimal 10 per halaman)."""
+    products = context.user_data.get("produk_list", [])
+    per_page = PRODUK_PER_PAGE
+    total = len(products)
+    total_pages = (total + per_page - 1) // per_page
+
+    start = page * per_page
+    end = min(start + per_page, total)
+
+    text = "📦 <b>Daftar Produk</b>\n\n"
+    for i in range(start, end):
+        p = products[i]
+        nama = p.get("name", p.get("productName", "Tanpa Nama"))
+        stok = p.get("stock", p.get("inStock", "-"))
+
+        if isinstance(stok, (int, float)):
+            stok_str = str(int(stok))
+        elif isinstance(stok, str) and stok.isdigit():
+            stok_str = stok
+        else:
+            stok_str = str(stok) if stok != "-" else "?"
+
+        text += f"<b>[{i + 1}]</b> {nama} ( {stok_str} )\n"
+
+    text += f"\n📄 Halaman {page + 1}/{total_pages}"
+    text += "\n<i>Ketuk nomor produk di keyboard bawah untuk membeli.</i>"
+
+    kb = produk_nomor_keyboard(total, page)
+
+    # Gunakan message.reply_text untuk pesan baru
     await update.message.reply_text(
         text,
         parse_mode="HTML",
         reply_markup=kb,
+    )
+
+async def produk_prev(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Navigasi ke halaman sebelumnya daftar produk."""
+    if not context.user_data.get("awaiting_produk_nomor"):
+        return
+
+    page = context.user_data.get("produk_page", 0)
+    if page > 0:
+        page -= 1
+        context.user_data["produk_page"] = page
+        await _tampilkan_halaman_produk(update, context, page)
+
+async def produk_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Navigasi ke halaman berikutnya daftar produk."""
+    if not context.user_data.get("awaiting_produk_nomor"):
+        return
+
+    products = context.user_data.get("produk_list", [])
+    total = len(products)
+    total_pages = (total + PRODUK_PER_PAGE - 1) // PRODUK_PER_PAGE
+    page = context.user_data.get("produk_page", 0)
+
+    if page < total_pages - 1:
+        page += 1
+        context.user_data["produk_page"] = page
+        await _tampilkan_halaman_produk(update, context, page)
+
+async def produk_kembali_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kembali ke menu utama dari daftar produk."""
+    uid = update.effective_user.id
+    context.user_data.pop("awaiting_produk_nomor", None)
+    context.user_data.pop("produk_list", None)
+    context.user_data.pop("produk_page", None)
+
+    await update.message.reply_text(
+        "🏠 Kembali ke menu utama.",
+        reply_markup=get_keyboard(uid),
     )
 
 async def pilih_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1962,6 +2019,8 @@ async def main():
                     & ~filters.Regex("^🔑 Buat Kode Reseller$") & ~filters.Regex("^📋 Daftar Reseller$")
                     & ~filters.Regex("^🆘 Support$") & ~filters.Regex("^📜 Riwayat$")
                     & ~filters.Regex("^📦 Products$")
+                    & ~filters.Regex("^⬅️ Prev$") & ~filters.Regex("^➡️ Next$")
+                    & ~filters.Regex("^🏠 Kembali ke Menu Utama$")
                    ,
                     beli_qty,
                 ),
@@ -1969,6 +2028,9 @@ async def main():
         },
         fallbacks=[
             MessageHandler(filters.Regex("^❌ Batal$"), beli_batal),
+            MessageHandler(filters.Regex("^⬅️ Prev$"), produk_prev),
+            MessageHandler(filters.Regex("^➡️ Next$"), produk_next),
+            MessageHandler(filters.Regex("^🏠 Kembali ke Menu Utama$"), produk_kembali_menu),
             MessageHandler(filters.Regex("^💰 Cek Saldo$"), beli_to_saldo),
             MessageHandler(filters.Regex("^👤 Info Akun$"), beli_to_info),
             MessageHandler(filters.Regex("^📋 Daftar Reseller$"), beli_to_daftar_reseller),
@@ -1999,6 +2061,8 @@ async def main():
                     & ~filters.Regex("^👤 Info Akun$") & ~filters.Regex("^📋 Daftar Reseller$")
                     & ~filters.Regex("^🆘 Support$") & ~filters.Regex("^📜 Riwayat$")
                     & ~filters.Regex("^📦 Products$")
+                    & ~filters.Regex("^⬅️ Prev$") & ~filters.Regex("^➡️ Next$")
+                    & ~filters.Regex("^🏠 Kembali ke Menu Utama$")
                    ,
                     genkode_custom_input,
                 ),
@@ -2006,6 +2070,9 @@ async def main():
         },
         fallbacks=[
             MessageHandler(filters.Regex("^❌ Batal$"), genkode_batal),
+            MessageHandler(filters.Regex("^⬅️ Prev$"), produk_prev),
+            MessageHandler(filters.Regex("^➡️ Next$"), produk_next),
+            MessageHandler(filters.Regex("^🏠 Kembali ke Menu Utama$"), produk_kembali_menu),
             MessageHandler(filters.Regex("^🛒 Gemini$"), beli_to_start),
             MessageHandler(filters.Regex("^📦 Products$"), beli_to_produk),
             MessageHandler(filters.Regex("^💰 Cek Saldo$"), beli_to_saldo),
@@ -2048,6 +2115,9 @@ async def main():
     app.add_handler(MessageHandler(filters.Regex("^🆘 Support$"), support))
     app.add_handler(MessageHandler(filters.Regex("^🏷️ Atur Harga$"), atur_harga_start))
     app.add_handler(MessageHandler(filters.Regex("^📦 Products$"), daftar_produk))
+    app.add_handler(MessageHandler(filters.Regex("^⬅️ Prev$"), produk_prev))
+    app.add_handler(MessageHandler(filters.Regex("^➡️ Next$"), produk_next))
+    app.add_handler(MessageHandler(filters.Regex("^🏠 Kembali ke Menu Utama$"), produk_kembali_menu))
     app.add_handler(MessageHandler(filters.Regex("^❌ Batal$"), beli_batal))
 
     # --- Callback Handlers (pembayaran & konfirmasi) ---
