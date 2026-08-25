@@ -88,8 +88,10 @@ def get_role(user_id: int) -> str:
     return "user"
 
 def pakasir_configured() -> bool:
-    """Cek apakah konfigurasi Pakasir sudah lengkap."""
-    return bool(PAKASIR_SLUG)
+    """Cek apakah metode pembayaran otomatis aktif."""
+    if not bool(PAKASIR_SLUG):
+        return False
+    return db.get_setting("auto_payment_enabled", True)
 
 
 # ================================================================
@@ -101,11 +103,24 @@ def admin_keyboard():
         [
             [KeyboardButton("🛒 Beli Gemini Pro"), KeyboardButton("📦 Products")],
             [KeyboardButton("💰 Cek Saldo"), KeyboardButton("🏷️ Atur Harga")],
-            [KeyboardButton("🔑 Buat Kode Reseller"), KeyboardButton("📋 Daftar Reseller")],
-            [KeyboardButton("📜 Riwayat"), KeyboardButton("👤 Info Akun")],
+            [KeyboardButton("🔧 Admin Panel"), KeyboardButton("👤 Info Akun")],
         ],
         resize_keyboard=True,
         is_persistent=True,
+    )
+
+def admin_panel_keyboard():
+    """Keyboard Admin Panel."""
+    auto_on = db.get_setting("auto_payment_enabled", True)
+    auto_status = "🟢 ON" if auto_on else "🔴 OFF"
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("🔑 Buat Kode Reseller"), KeyboardButton("📋 Daftar Reseller")],
+            [KeyboardButton("📜 Riwayat")],
+            [KeyboardButton(f"🤖 Auto Payment: {auto_status}")],
+            [KeyboardButton("🔙 Kembali ke Menu")],
+        ],
+        resize_keyboard=True,
     )
 
 
@@ -251,6 +266,59 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
+
+# ================================================================
+# 🔧 ADMIN PANEL
+# ================================================================
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tampilkan Admin Panel."""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Akses ditolak. Menu ini khusus Admin.")
+        return
+
+    auto_on = db.get_setting("auto_payment_enabled", True)
+    auto_status = "🟢 ON" if auto_on else "🔴 OFF"
+
+    text = (
+        f"🔧 <b>Admin Panel</b>\n\n"
+        f"┃ 🤖 Auto Payment : {auto_status}\n\n"
+        f"Pilih menu di bawah 👇"
+    )
+    await update.message.reply_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=admin_panel_keyboard(),
+    )
+
+async def toggle_auto_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle on/off metode pembayaran otomatis."""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Akses ditolak. Menu ini khusus Admin.")
+        return
+
+    current = db.get_setting("auto_payment_enabled", True)
+    new_val = not current
+    db.set_setting("auto_payment_enabled", new_val)
+
+    status = "🟢 ON" if new_val else "🔴 OFF"
+    text = f"🤖 <b>Auto Payment: {status}</b>\n\n"
+    if new_val:
+        text += "Metode pembayaran otomatis (QRIS Pakasir) sekarang <b>aktif</b>.\nUser dapat memilih pembayaran otomatis saat checkout."
+    else:
+        text += "Metode pembayaran otomatis (QRIS Pakasir) sekarang <b>nonaktif</b>.\nUser hanya bisa memilih pembayaran manual."
+
+    await update.message.reply_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=admin_panel_keyboard(),
+    )
+
+async def admin_panel_kembali(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kembali dari Admin Panel ke menu admin utama."""
+    await update.message.reply_text(
+        "🔙 Kembali ke menu utama.",
+        reply_markup=admin_keyboard(),
+    )
 
 async def daftar_reseller_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """User biasa daftar jadi reseller → minta kode reseller."""
@@ -2285,6 +2353,8 @@ async def main():
                     & ~filters.Regex("^👤 Info Akun$") & ~filters.Regex("^🔑 Buat Kode Reseller$") & ~filters.Regex("^📋 Daftar Reseller$")
                     & ~filters.Regex("^🆘 Support$") & ~filters.Regex("^📜 Riwayat$")
                     & ~filters.Regex("^📦 Products$")
+                    & ~filters.Regex("^🔧 Admin Panel$") & ~filters.Regex("^🤖 Auto Payment:")
+                    & ~filters.Regex("^🔙 Kembali ke Menu$")
                     & ~filters.Regex("^⬅️ Prev$") & ~filters.Regex("^➡️ Next$")
                     & ~filters.Regex("^🏠 Kembali ke Menu Utama$")
                    ,
@@ -2293,7 +2363,9 @@ async def main():
             ],
             INPUT_CUSTOM_QTY: [
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND & ~filters.Regex("^❌ Batal$"),
+                    filters.TEXT & ~filters.COMMAND & ~filters.Regex("^❌ Batal$")
+                    & ~filters.Regex("^🔧 Admin Panel$") & ~filters.Regex("^🤖 Auto Payment:")
+                    & ~filters.Regex("^🔙 Kembali ke Menu$"),
                     beli_custom_qty,
                 ),
             ],
@@ -2304,6 +2376,8 @@ async def main():
                     & ~filters.Regex("^🔑 Buat Kode Reseller$") & ~filters.Regex("^📋 Daftar Reseller$")
                     & ~filters.Regex("^🆘 Support$") & ~filters.Regex("^📜 Riwayat$")
                     & ~filters.Regex("^📦 Products$")
+                    & ~filters.Regex("^🔧 Admin Panel$") & ~filters.Regex("^🤖 Auto Payment:")
+                    & ~filters.Regex("^🔙 Kembali ke Menu$")
                     & ~filters.Regex("^⬅️ Prev$") & ~filters.Regex("^➡️ Next$")
                     & ~filters.Regex("^🏠 Kembali ke Menu Utama$"),
                     pilih_metode_reply,
@@ -2345,6 +2419,8 @@ async def main():
                     & ~filters.Regex("^👤 Info Akun$") & ~filters.Regex("^📋 Daftar Reseller$")
                     & ~filters.Regex("^🆘 Support$") & ~filters.Regex("^📜 Riwayat$")
                     & ~filters.Regex("^📦 Products$")
+                    & ~filters.Regex("^🔧 Admin Panel$") & ~filters.Regex("^🤖 Auto Payment:")
+                    & ~filters.Regex("^🔙 Kembali ke Menu$")
                     & ~filters.Regex("^⬅️ Prev$") & ~filters.Regex("^➡️ Next$")
                     & ~filters.Regex("^🏠 Kembali ke Menu Utama$")
                    ,
@@ -2399,6 +2475,9 @@ async def main():
     app.add_handler(MessageHandler(filters.Regex("^🆘 Support$"), support))
     app.add_handler(MessageHandler(filters.Regex("^🏷️ Atur Harga$"), atur_harga_start))
     app.add_handler(MessageHandler(filters.Regex("^📦 Products$"), daftar_produk))
+    app.add_handler(MessageHandler(filters.Regex("^🔧 Admin Panel$"), admin_panel))
+    app.add_handler(MessageHandler(filters.Regex("^🤖 Auto Payment:"), toggle_auto_payment))
+    app.add_handler(MessageHandler(filters.Regex("^🔙 Kembali ke Menu$"), admin_panel_kembali))
     app.add_handler(MessageHandler(filters.Regex("^⬅️ Prev$"), produk_prev))
     app.add_handler(MessageHandler(filters.Regex("^➡️ Next$"), produk_next))
     app.add_handler(MessageHandler(filters.Regex("^🏠 Kembali ke Menu Utama$"), produk_kembali_menu))
