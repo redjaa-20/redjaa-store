@@ -257,7 +257,7 @@ def get_setting(key: str, default=None):
 
 def generate_unique_code() -> int:
     """
-    Buat kode unik 1-3 digit (100-999) untuk membedakan transfer manual.
+    Buat kode unik 1-150 untuk membedakan transfer manual.
     Pastikan tidak ada kode yang sama yang masih pending.
     """
     import random as _random
@@ -268,13 +268,13 @@ def generate_unique_code() -> int:
         for o in db["orders"].values()
         if o.get("status") == "pending" and o.get("unique_code", 0) > 0
     }
-    # Generate kode 100-999 yang belum dipakai
-    for _ in range(100):
-        code = _random.randint(100, 999)
+    # Generate kode 1-150 yang belum dipakai
+    for _ in range(200):
+        code = _random.randint(1, 150)
         if code not in used_codes:
             return code
     # Fallback: return random saja
-    return _random.randint(100, 999)
+    return _random.randint(1, 150)
 
 
 def set_setting(key: str, value):

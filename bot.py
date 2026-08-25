@@ -914,9 +914,12 @@ async def _reseller_buat_order(update, context, quantity: int, method: str = "ma
             f"⏳ Pesanan akan diproses setelah admin memverifikasi bukti pembayaran."
         )
 
-    confirm_kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("❌ Batalkan Order", callback_data=f"cancel_{order_id}")],
-    ])
+    confirm_kb = ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("🔄 Ubah Metode Pembayaran"), KeyboardButton("❌ Batal")],
+        ],
+        resize_keyboard=True,
+    )
 
     # Kirim gambar QRIS pakai file_id cache (lebih cepat) atau upload dari file
     cached_file_id = db.get_setting("qris_file_id")
@@ -1508,6 +1511,48 @@ async def atur_harga_reseller_input(update: Update, context: ContextTypes.DEFAUL
     context.user_data.pop("awaiting_input", None)
     context.user_data.pop("harga_reseller_tid", None)
 
+
+async def ubah_metode_pembayaran(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """User ingin ubah metode pembayaran → batalkan order pending, kembali ke pilih metode."""
+    uid = update.effective_user.id
+    quantity = context.user_data.get("pending_quantity", 1)
+
+    # Batalkan order pending jika ada
+    pending = db.get_pending_order_by_user(uid)
+    if pending:
+        order_id, order = pending
+        db.update_order_status(order_id, "rejected")
+
+        # Hapus pesan QRIS
+        qris_msg_id = context.user_data.get("qris_message_id")
+        if qris_msg_id:
+            try:
+                await context.bot.delete_message(chat_id=uid, message_id=qris_msg_id)
+            except Exception:
+                pass
+
+    context.user_data.pop("pending_order_id", None)
+    context.user_data.pop("qris_message_id", None)
+
+    # Ambil data produk
+    prod_name = context.user_data.get("selected_product_name", PRODUCT_NAME)
+
+    # Ambil harga sesuai role
+    if db.is_reseller(uid):
+        harga = db.get_reseller_price(uid, PRICE_PER_UNIT)
+    else:
+        harga = db.get_general_price(PRICE_PER_UNIT)
+    total = quantity * harga
+    pakasir_ready = pakasir_configured()
+
+    text_msg = _build_metode_text(prod_name, quantity, harga, total, pakasir_ready)
+
+    await update.message.reply_text(
+        text_msg,
+        parse_mode="HTML",
+        reply_markup=metode_keyboard(pakasir_ready),
+    )
+    raise ApplicationHandlerStop
 
 async def beli_batal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Batalkan pembelian & order pending jika ada."""
@@ -2299,6 +2344,7 @@ async def main():
     app.add_handler(MessageHandler(filters.Regex("^⬅️ Prev$"), produk_prev))
     app.add_handler(MessageHandler(filters.Regex("^➡️ Next$"), produk_next))
     app.add_handler(MessageHandler(filters.Regex("^🏠 Kembali ke Menu Utama$"), produk_kembali_menu))
+    app.add_handler(MessageHandler(filters.Regex("^🔄 Ubah Metode Pembayaran$"), ubah_metode_pembayaran))
     app.add_handler(MessageHandler(filters.Regex("^❌ Batal$"), beli_batal))
 
     # --- Callback Handlers (pembayaran & konfirmasi) ---
