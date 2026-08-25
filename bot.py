@@ -64,6 +64,7 @@ INPUT_QTY = 0
 REGISTER_CODE = 2
 WAIT_BUKTI = 4
 INPUT_CUSTOM_PRICE = 3
+INPUT_CUSTOM_QTY = 5
 
 
 # ================================================================
@@ -139,12 +140,12 @@ def batal_keyboard():
 
 
 def jumlah_keyboard():
-    """Keyboard pilihan jumlah 1 sampai 10 dan tombol Batal."""
+    """Keyboard pilihan jumlah 1 sampai 10, tombol Custom, dan tombol Batal."""
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("1"), KeyboardButton("2"), KeyboardButton("3"), KeyboardButton("4"), KeyboardButton("5")],
             [KeyboardButton("6"), KeyboardButton("7"), KeyboardButton("8"), KeyboardButton("9"), KeyboardButton("10")],
-            [KeyboardButton("❌ Batal")],
+            [KeyboardButton("🔢 Custom"), KeyboardButton("❌ Batal")],
         ],
         resize_keyboard=True,
     )
@@ -482,9 +483,9 @@ def _build_product_description(uid: int) -> str:
         f"🛒 <b>GEMINI PRO 18 BULAN</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"📋 <b>Informasi Produk</b>\n"
-        f"┃ 📌 Nama Produk : <b>Gemini Pro 18 Bulan</b>\n"
-        f"┃ 🔑 Format       : Link Aktivasi\n"
-        f"┃ 📈 Terjual      : <b>{terjual}</b> unit\n\n"
+        f"┃ 📌 Nama     : <b>Gemini Pro 18 Bulan</b>\n"
+        f"┃ 🔑 Format   : Link Aktivasi\n"
+        f"┃ 📈 Terjual  : <b>{terjual}</b> unit\n\n"
         f"✨ <b>Fitur Unggulan</b>\n"
         f"┃ ⏱️ Durasi 18 Bulan\n"
         f"┃ 📧 Pakai Email Sendiri\n"
@@ -527,6 +528,17 @@ async def beli_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def beli_qty(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Langkah 2: Proses berdasarkan role."""
     text = update.message.text.strip()
+
+    # Tombol Custom → minta input jumlah manual
+    if text == "🔢 Custom":
+        await update.message.reply_text(
+            "🔢 <b>Input Jumlah Custom</b>\n\n"
+            "Ketik jumlah unit yang ingin dibeli:\n"
+            "<i>(contoh: 15, 20, 50)</i>",
+            parse_mode="HTML",
+            reply_markup=batal_keyboard(),
+        )
+        return INPUT_CUSTOM_QTY
 
     if not text.isdigit() or int(text) <= 0:
         await update.message.reply_text("❌ Jumlah harus berupa angka positif. Coba lagi:")
@@ -596,6 +608,74 @@ async def beli_qty(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
+async def beli_custom_qty(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler untuk input jumlah custom dari user."""
+    text = update.message.text.strip()
+
+    if not text.isdigit() or int(text) <= 0:
+        await update.message.reply_text("❌ Jumlah harus berupa angka positif. Coba lagi:")
+        return INPUT_CUSTOM_QTY
+
+    uid = update.effective_user.id
+    prod_id = context.user_data.get("selected_product_id", PRODUCT_ID)
+    prod_name = context.user_data.get("selected_product_name", PRODUCT_NAME)
+
+    # ADMIN -> beli langsung ke API
+    if is_admin(uid):
+        return await _admin_beli_langsung(update, context, int(text), prod_id, prod_name)
+
+    # USER/RESELLER -> pilih metode konfirmasi pembayaran
+    if db.is_reseller(uid):
+        harga = db.get_reseller_price(uid, PRICE_PER_UNIT)
+    else:
+        harga = db.get_general_price(PRICE_PER_UNIT)
+
+    quantity = int(text)
+    total = quantity * harga
+
+    pakasir_ready = pakasir_configured()
+
+    buttons = []
+    if pakasir_ready:
+        buttons.append([InlineKeyboardButton(
+            f"🤖 Otomatis (+biaya admin)",
+            callback_data=f"metode_auto_{quantity}",
+        )])
+    buttons.append([InlineKeyboardButton(
+        "👤 Manual (Tanpa biaya admin)",
+        callback_data=f"metode_manual_{quantity}",
+    )])
+
+    metode_kb = InlineKeyboardMarkup(buttons)
+
+    custom_text = (
+        f"🛒 <b>Pilih Metode Pembayaran</b>\n\n"
+        f"🔹 Produk : {prod_name}\n"
+        f"🔹 Jumlah : {quantity} unit\n"
+        f"🔹 Harga  : {currency.format_idr(harga)}/unit\n"
+        f"🔹 Total  : <b>{currency.format_idr(total)}</b>\n\n"
+    )
+    if pakasir_ready:
+        custom_text += (
+            f"🤖 <b>Otomatis</b> — Bayar via QRIS Pakasir, verifikasi otomatis.\n"
+            f"<i>(Ada biaya admin dari payment gateway)</i>\n\n"
+            f"👤 <b>Manual</b> — Bayar via QRIS, kirim bukti transfer, admin verifikasi.\n"
+            f"<i>(Tanpa biaya admin)</i>\n\n"
+            f"Pilih metode pembayaran:"
+        )
+    else:
+        custom_text += (
+            f"👤 <b>Manual</b> — Bayar via QRIS, kirim bukti transfer, admin verifikasi.\n"
+            f"<i>(Tanpa biaya admin)</i>\n\n"
+            f"Pilih metode pembayaran:"
+        )
+
+    await update.message.reply_text(
+        custom_text,
+        parse_mode="HTML",
+        reply_markup=metode_kb,
+    )
+    return ConversationHandler.END
 
 async def _admin_beli_langsung(update, context, quantity: int, product_id: str = None, product_name: str = None):
     """Admin beli langsung ke API tanpa pembayaran."""
@@ -2059,6 +2139,12 @@ async def main():
                     & ~filters.Regex("^🏠 Kembali ke Menu Utama$")
                    ,
                     beli_qty,
+                ),
+            ],
+            INPUT_CUSTOM_QTY: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND & ~filters.Regex("^❌ Batal$"),
+                    beli_custom_qty,
                 ),
             ],
         },
