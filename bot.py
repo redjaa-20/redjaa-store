@@ -65,6 +65,7 @@ REGISTER_CODE = 2
 WAIT_BUKTI = 4
 INPUT_CUSTOM_PRICE = 3
 INPUT_CUSTOM_QTY = 5
+PILIH_METODE = 6
 
 
 # ================================================================
@@ -149,6 +150,15 @@ def jumlah_keyboard():
         ],
         resize_keyboard=True,
     )
+
+def metode_keyboard(pakasir_ready: bool = True):
+    """Keyboard untuk pilih metode pembayaran."""
+    rows = []
+    if pakasir_ready:
+        rows.append([KeyboardButton("🤖 Otomatis (ada biaya admin)")])
+    rows.append([KeyboardButton("👤 Manual (tanpa biaya admin)")])
+    rows.append([KeyboardButton("❌ Batal")])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 PRODUK_PER_PAGE = 10
 
@@ -556,57 +566,25 @@ async def beli_qty(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await _admin_beli_langsung(update, context, quantity, prod_id, prod_name)
 
     # USER/RESELLER → pilih metode konfirmasi pembayaran
-    # Ambil harga untuk ditampilkan
     if db.is_reseller(uid):
         harga = db.get_reseller_price(uid, PRICE_PER_UNIT)
     else:
         harga = db.get_general_price(PRICE_PER_UNIT)
     total = quantity * harga
 
-    # Cek apakah Pakasir tersedia
     pakasir_ready = pakasir_configured()
 
-    buttons = []
-    if pakasir_ready:
-        buttons.append([InlineKeyboardButton(
-            f"🤖 Otomatis (+biaya admin)",
-            callback_data=f"metode_auto_{quantity}",
-        )])
-    buttons.append([InlineKeyboardButton(
-        "👤 Manual (Tanpa biaya admin)",
-        callback_data=f"metode_manual_{quantity}",
-    )])
+    # Simpan quantity untuk handler pilih_metode_reply
+    context.user_data["pending_quantity"] = quantity
 
-    metode_kb = InlineKeyboardMarkup(buttons)
-
-    text_msg = (
-        f"🛒 <b>Pilih Metode Pembayaran</b>\n\n"
-        f"🔹 Produk : {prod_name}\n"
-        f"🔹 Jumlah : {quantity} unit\n"
-        f"🔹 Harga  : {currency.format_idr(harga)}/unit\n"
-        f"🔹 Total  : <b>{currency.format_idr(total)}</b>\n\n"
-    )
-    if pakasir_ready:
-        text_msg += (
-            f"🤖 <b>Otomatis</b> — Bayar via QRIS Pakasir, verifikasi otomatis.\n"
-            f"<i>(Ada biaya admin dari payment gateway)</i>\n\n"
-            f"👤 <b>Manual</b> — Bayar via QRIS, kirim bukti transfer, admin verifikasi.\n"
-            f"<i>(Tanpa biaya admin)</i>\n\n"
-            f"Pilih metode pembayaran:"
-        )
-    else:
-        text_msg += (
-            f"👤 <b>Manual</b> — Bayar via QRIS, kirim bukti transfer, admin verifikasi.\n"
-            f"<i>(Tanpa biaya admin)</i>\n\n"
-            f"Pilih metode pembayaran:"
-        )
+    text_msg = _build_metode_text(prod_name, quantity, harga, total, pakasir_ready)
 
     await update.message.reply_text(
         text_msg,
         parse_mode="HTML",
-        reply_markup=metode_kb,
+        reply_markup=metode_keyboard(pakasir_ready),
     )
-    return ConversationHandler.END
+    return PILIH_METODE
 
 async def beli_custom_qty(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler untuk input jumlah custom dari user."""
@@ -635,47 +613,17 @@ async def beli_custom_qty(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     pakasir_ready = pakasir_configured()
 
-    buttons = []
-    if pakasir_ready:
-        buttons.append([InlineKeyboardButton(
-            f"🤖 Otomatis (+biaya admin)",
-            callback_data=f"metode_auto_{quantity}",
-        )])
-    buttons.append([InlineKeyboardButton(
-        "👤 Manual (Tanpa biaya admin)",
-        callback_data=f"metode_manual_{quantity}",
-    )])
+    # Simpan quantity untuk handler pilih_metode_reply
+    context.user_data["pending_quantity"] = quantity
 
-    metode_kb = InlineKeyboardMarkup(buttons)
-
-    custom_text = (
-        f"🛒 <b>Pilih Metode Pembayaran</b>\n\n"
-        f"🔹 Produk : {prod_name}\n"
-        f"🔹 Jumlah : {quantity} unit\n"
-        f"🔹 Harga  : {currency.format_idr(harga)}/unit\n"
-        f"🔹 Total  : <b>{currency.format_idr(total)}</b>\n\n"
-    )
-    if pakasir_ready:
-        custom_text += (
-            f"🤖 <b>Otomatis</b> — Bayar via QRIS Pakasir, verifikasi otomatis.\n"
-            f"<i>(Ada biaya admin dari payment gateway)</i>\n\n"
-            f"👤 <b>Manual</b> — Bayar via QRIS, kirim bukti transfer, admin verifikasi.\n"
-            f"<i>(Tanpa biaya admin)</i>\n\n"
-            f"Pilih metode pembayaran:"
-        )
-    else:
-        custom_text += (
-            f"👤 <b>Manual</b> — Bayar via QRIS, kirim bukti transfer, admin verifikasi.\n"
-            f"<i>(Tanpa biaya admin)</i>\n\n"
-            f"Pilih metode pembayaran:"
-        )
+    custom_text = _build_metode_text(prod_name, quantity, harga, total, pakasir_ready)
 
     await update.message.reply_text(
         custom_text,
         parse_mode="HTML",
-        reply_markup=metode_kb,
+        reply_markup=metode_keyboard(pakasir_ready),
     )
-    return ConversationHandler.END
+    return PILIH_METODE
 
 async def _admin_beli_langsung(update, context, quantity: int, product_id: str = None, product_name: str = None):
     """Admin beli langsung ke API tanpa pembayaran."""
@@ -730,7 +678,57 @@ async def _admin_beli_langsung(update, context, quantity: int, product_id: str =
     return ConversationHandler.END
 
 
+def _build_metode_text(prod_name: str, quantity: int, harga: int, total: int, pakasir_ready: bool) -> str:
+    """Bangun pesan Pilih Metode Pembayaran."""
+    garis = "━" * 24
+    text = (
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💳 <b>Pilih Metode Pembayaran</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📦 Produk : {prod_name}\n"
+        f"🔢 Jumlah : {quantity} unit\n"
+        f"💰 Harga  : {currency.format_idr(harga)}/unit\n"
+        f"💵 Total  : <b>{currency.format_idr(total)}</b>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
+    if pakasir_ready:
+        text += (
+            f"🤖 <b>Otomatis</b> — Bayar via QRIS Pakasir, verifikasi otomatis.\n"
+            f"<i>(Ada biaya admin dari payment gateway)</i>\n\n"
+            f"👤 <b>Manual</b> — Bayar via QRIS, kirim bukti transfer, admin verifikasi.\n"
+            f"<i>(Tanpa biaya admin)</i>\n\n"
+        )
+    else:
+        text += (
+            f"👤 <b>Manual</b> — Bayar via QRIS, kirim bukti transfer, admin verifikasi.\n"
+            f"<i>(Tanpa biaya admin)</i>\n\n"
+        )
+    text += "👇 Pilih metode pembayaran di keyboard bawah:"
+    return text
+
+async def pilih_metode_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler: user pilih metode pembayaran via ReplyKeyboard."""
+    text = update.message.text.strip()
+    uid = update.effective_user.id
+
+    quantity = context.user_data.get("pending_quantity", 1)
+
+    if text == "🤖 Otomatis (ada biaya admin)":
+        method = "auto"
+    elif text == "👤 Manual (tanpa biaya admin)":
+        method = "manual"
+    elif text == "❌ Batal":
+        await beli_batal(update, context)
+        return ConversationHandler.END
+    else:
+        return PILIH_METODE
+
+    context.user_data.pop("pending_quantity", None)
+    await _reseller_buat_order(update, context, quantity, method)
+    return ConversationHandler.END
+
 async def pilih_metode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback: user/reseller pilih metode pembayaran (auto/manual). [LEGACY]"""
     """Callback: user/reseller pilih metode pembayaran (auto/manual)."""
     query = update.callback_query
     await query.answer()
@@ -2147,6 +2145,18 @@ async def main():
                     beli_custom_qty,
                 ),
             ],
+            PILIH_METODE: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🛒 Beli Gemini Pro$")
+                    & ~filters.Regex("^💰 Cek Saldo$") & ~filters.Regex("^👤 Info Akun$")
+                    & ~filters.Regex("^🔑 Buat Kode Reseller$") & ~filters.Regex("^📋 Daftar Reseller$")
+                    & ~filters.Regex("^🆘 Support$") & ~filters.Regex("^📜 Riwayat$")
+                    & ~filters.Regex("^📦 Products$")
+                    & ~filters.Regex("^⬅️ Prev$") & ~filters.Regex("^➡️ Next$")
+                    & ~filters.Regex("^🏠 Kembali ke Menu Utama$"),
+                    pilih_metode_reply,
+                ),
+            ],
         },
         fallbacks=[
             MessageHandler(filters.Regex("^❌ Batal$"), beli_batal),
@@ -2248,7 +2258,6 @@ async def main():
     app.add_handler(CallbackQueryHandler(admin_reject_order, pattern="^reject_"))
     app.add_handler(CallbackQueryHandler(riwayat_pagination, pattern="^riwayat_"))
     app.add_handler(CallbackQueryHandler(cek_pembayaran, pattern="^cekpay_"))
-    app.add_handler(CallbackQueryHandler(pilih_metode, pattern="^metode_"))
     app.add_handler(CallbackQueryHandler(atur_harga_umum_prompt, pattern="^setharga_umum$"))
     app.add_handler(CallbackQueryHandler(atur_harga_reseller_pilih, pattern="^setharga_reseller$"))
     app.add_handler(CallbackQueryHandler(atur_harga_reseller_prompt, pattern="^setharga_r_"))
