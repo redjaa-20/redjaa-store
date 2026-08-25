@@ -450,42 +450,74 @@ async def cek_saldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ================================================================
-# 🛒 GEMINI / BELI (Admin & Reseller)
+# 🛒 BELI GEMINI PRO — Deskripsi Produk
 # ================================================================
+def _build_product_description(uid: int) -> str:
+    """Bangun deskripsi produk dengan format menarik."""
+    # Ambil harga sesuai role
+    if is_admin(uid):
+        harga = PRICE_PER_UNIT
+    elif db.is_reseller(uid):
+        harga = db.get_reseller_price(uid, PRICE_PER_UNIT)
+    else:
+        harga = db.get_general_price(PRICE_PER_UNIT)
+
+    terjual = db.get_sold_count()
+    stok_str = "✅ Tersedia"
+    now = datetime.now(timezone.utc) + timedelta(hours=7)
+    hari = now.strftime("%A")
+    # Translate hari ke Indonesia
+    hari_map = {
+        "Monday": "Senin", "Tuesday": "Selasa", "Wednesday": "Rabu",
+        "Thursday": "Kamis", "Friday": "Jumat", "Saturday": "Sabtu", "Sunday": "Minggu",
+    }
+    hari_id = hari_map.get(hari, hari)
+    tanggal = now.strftime("%d/%m/%Y")
+    jam = now.strftime("%H:%M")
+
+    garis = "━" * 24
+
+    desc = (
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🛒 <b>GEMINI PRO 18 BULAN</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📋 <b>Informasi Produk</b>\n"
+        f"┃ 📌 Nama Produk : <b>Gemini Pro 18 Bulan</b>\n"
+        f"┃ 🔑 Format       : Link Aktivasi\n"
+        f"┃ 📈 Terjual      : <b>{terjual}</b> unit\n\n"
+        f"✨ <b>Fitur Unggulan</b>\n"
+        f"┃ ⏱️ Durasi 18 Bulan\n"
+        f"┃ 📧 Pakai Email Sendiri\n"
+        f"┃    <i>(tidak butuh password & kode 2FA)</i>\n"
+        f"┃ ⚡ Aktivasi Sekali Klik\n"
+        f"┃ 👑 Akun Head\n"
+        f"┃    <i>(bisa invite 5 member)</i>\n"
+        f"┃ 💾 Penyimpanan Google Drive 5TB\n"
+        f"┃ 🤖 Akses Model Terbaru Gemini\n"
+        f"┃ 🎯 1.000 Credit Flow\n"
+        f"┃    <i>(reset tiap bulan)</i>\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 <b>Harga</b> : <b>{currency.format_idr(harga)}</b>\n"
+        f"📦 <b>Stok</b>   : {stok_str}\n"
+        f"🕐 <b>Update</b> : {hari_id}, {tanggal} - {jam} WIB\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🔢 <b>Masukkan jumlah yang ingin dibeli:</b>\n"
+        f"<i>(ketik angka, contoh: 1, 5, 10)</i>"
+    )
+    return desc
+
 async def beli_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Langkah 1: Minta quantity."""
+    """Langkah 1: Tampilkan deskripsi produk, minta quantity."""
     uid = update.effective_user.id
 
-    # Reset produk ke default (tombol Gemini langsung)
+    # Reset produk ke default (tombol Beli Gemini Pro langsung)
     context.user_data["selected_product_id"] = PRODUCT_ID
     context.user_data["selected_product_name"] = PRODUCT_NAME
 
-    if is_admin(uid):
-        info = (
-            f"🛒 <b>Gemini — {PRODUCT_NAME}</b>\n\n"
-            f"🔢 Masukkan jumlah yang ingin dibeli:\n"
-            f"<i>(ketik angka, contoh: 1, 5, 10)</i>"
-        )
-    elif db.is_reseller(uid):
-        harga = db.get_reseller_price(uid, PRICE_PER_UNIT)
-        info = (
-            f"🛒 <b>Gemini — {PRODUCT_NAME}</b>\n\n"
-            f"💵 Harga per unit: <b>{currency.format_idr(harga)}</b>\n\n"
-            f"🔢 Masukkan jumlah yang ingin dibeli:\n"
-            f"<i>(ketik angka, contoh: 1, 5, 10)</i>"
-        )
-    else:
-        # User biasa → pakai harga umum
-        harga = db.get_general_price(PRICE_PER_UNIT)
-        info = (
-            f"🛒 <b>Gemini — {PRODUCT_NAME}</b>\n\n"
-            f"💵 Harga per unit: <b>{currency.format_idr(harga)}</b>\n\n"
-            f"🔢 Masukkan jumlah yang ingin dibeli:\n"
-            f"<i>(ketik angka, contoh: 1, 5, 10)</i>"
-        )
+    desc = _build_product_description(uid)
 
     await update.message.reply_text(
-        info,
+        desc,
         parse_mode="HTML",
         reply_markup=jumlah_keyboard(),
     )
@@ -594,6 +626,7 @@ async def _admin_beli_langsung(update, context, quantity: int, product_id: str =
 
     order_id = db.generate_order_id()
     reply = build_success_message(order_id, quantity, result, product_name=pname)
+    db.increment_sold_count(quantity)
 
     # Gunakan send_long_message untuk handle pesan yang mungkin sangat panjang
     await send_long_message(
@@ -1009,6 +1042,7 @@ async def admin_approve_order(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     db.update_order_status(order_id, "delivered")
+    db.increment_sold_count(order["quantity"])
 
     # Format data produk (harga API disembunyikan dari reseller)
     produk_text = build_success_message(order_id, order["quantity"], result, product_name=prod_name)
@@ -1144,6 +1178,7 @@ async def cek_pembayaran(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         db.update_order_status(order_id, "delivered")
+        db.increment_sold_count(order["quantity"])
 
         prod_name = order.get("product_name") or PRODUCT_NAME
         produk_text = build_success_message(order_id, order["quantity"], api_result, product_name=prod_name)

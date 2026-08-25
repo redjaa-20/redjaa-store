@@ -260,3 +260,20 @@ def set_setting(key: str, value):
     db = _load()
     db["settings"][key] = value
     _save(db)
+
+# ================================================================
+# SOLD COUNT (Jumlah terjual)
+# ================================================================
+def get_sold_count() -> int:
+    """Ambil jumlah total produk yang terjual. Default 501."""
+    db = _load()
+    return db["settings"].get("sold_count", 501)
+
+def increment_sold_count(quantity: int = 1) -> int:
+    """Tambah jumlah terjual sebanyak quantity. Return nilai baru."""
+    db = _load()
+    current = db["settings"].get("sold_count", 501)
+    current += quantity
+    db["settings"]["sold_count"] = current
+    _save(db)
+    return current
