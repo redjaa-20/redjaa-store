@@ -111,7 +111,7 @@ def user_keyboard():
     """Keyboard untuk User biasa."""
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🛒 Gemini"), KeyboardButton("📦 Products")],
+            [KeyboardButton("🛒 Gemini")],
             [KeyboardButton("📝 Daftar Reseller")],
             [KeyboardButton("👤 Info Akun"), KeyboardButton("🆘 Support")],
         ],
@@ -123,7 +123,7 @@ def reseller_keyboard():
     """Keyboard untuk Reseller."""
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🛒 Gemini"), KeyboardButton("📦 Products")],
+            [KeyboardButton("🛒 Gemini")],
             [KeyboardButton("👤 Info Akun"), KeyboardButton("🆘 Support")],
         ],
         resize_keyboard=True,
@@ -1754,6 +1754,9 @@ async def beli_to_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================================================================
 async def daftar_produk(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Fetch daftar produk dari ProdSeller API dan tampilkan sebagai daftar bernomor + keyboard angka (pagination)."""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Akses ditolak. Menu ini khusus Admin.")
+        return
     loading = await update.message.reply_text("⏳ Mengambil daftar produk...")
 
     result = api.get_products()
