@@ -376,6 +376,105 @@ def build_success_message(order_id: str, quantity: int, result: dict, product_na
 # ================================================================
 TELEGRAM_MAX_CHARS = 4000  # Batas aman di bawah 4096 (batas Telegram)
 
+def extract_product_links(result: dict) -> list[str]:
+    """Ambil semua link/key produk dari response API."""
+    links = []
+
+    delivered_keys = result.get("deliveredKeys", [])
+    delivered_key = result.get("deliveredKey")
+
+    if delivered_keys and len(delivered_keys) > 0:
+        links = list(delivered_keys)
+    elif delivered_key:
+        links = [delivered_key]
+    else:
+        # Fallback: ambil semua value kecuali metadata
+        for key, value in result.items():
+            if key in ("orderId", "createdAt", "status"):
+                continue
+            links.append(str(value))
+
+    return links
+
+def build_txt_file(links: list[str], order_id: str, product_name: str) -> bytes:
+    """Buat konten file .txt berisi daftar link produk."""
+    content = f"{'=' * 40}\n"
+    content += f"  REJAA DIGITAL — DATA PRODUK\n"
+    content += f"{'=' * 40}\n\n"
+    content += f"Order ID : {order_id}\n"
+    content += f"Produk   : {product_name}\n"
+    content += f"Jumlah   : {len(links)} unit\n"
+    content += f"Tanggal  : {now_wib()}\n"
+    content += f"{'=' * 40}\n\n"
+
+    for idx, link in enumerate(links, 1):
+        content += f"{idx}. {link}\n"
+
+    content += f"\n{'=' * 40}\n"
+    content += "Terima kasih telah berbelanja!\n"
+    content += f"{'=' * 40}\n"
+
+    return content.encode("utf-8")
+
+async def send_product_delivery(bot, chat_id: int, order_id: str, quantity: int,
+                                result: dict, product_name: str = None,
+                                reply_markup=None):
+    """
+    Kirim data produk ke user.
+    Jika quantity > 5, kirim sebagai file .txt + pesan ringkasan.
+    Jika quantity <= 5, kirim sebagai pesan teks biasa.
+    """
+    pname = product_name or PRODUCT_NAME
+    links = extract_product_links(result)
+    garis = "─" * 19
+
+    if quantity > 5 and links:
+        # Kirim sebagai file .txt
+        summary_text = (
+            f"✅ <b>Pembelian Berhasil!</b>\n\n"
+            f"🔖 Order ID : <code>{order_id}</code>\n"
+            f"📦 Produk   : {pname}\n"
+            f"🔢 Jumlah   : {quantity} unit\n"
+            f"{garis}\n"
+            f"📁 Data produk terlampir dalam file .txt\n"
+            f"   (<b>{len(links)} link</b>)\n"
+            f"{garis}\n"
+            f"🕐 {now_wib()}\n\n"
+            f"<i>Terima kasih telah berbelanja!</i>"
+        )
+
+        # Kirim pesan ringkasan dulu
+        await bot.send_message(
+            chat_id=chat_id,
+            text=summary_text,
+            parse_mode="HTML",
+        )
+
+        # Kirim file .txt
+        txt_content = build_txt_file(links, order_id, pname)
+        from io import BytesIO
+        txt_file = BytesIO(txt_content)
+        txt_file.name = f"produk_{order_id}.txt"
+
+        await bot.send_document(
+            chat_id=chat_id,
+            document=txt_file,
+            filename=f"produk_{order_id}.txt",
+            caption=f"📁 <b>{len(links)} Link Produk</b>\nOrder ID: <code>{order_id}</code>",
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
+    else:
+        # Kirim sebagai pesan teks biasa
+        full_text = build_success_message(order_id, quantity, result, product_name=pname)
+        await send_long_message(
+            bot,
+            chat_id=chat_id,
+            text=full_text,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
+
 def split_long_text(text: str, max_chars: int = TELEGRAM_MAX_CHARS) -> list[str]:
     """
     Pecah teks panjang menjadi beberapa bagian, maksimal max_chars per bagian.
@@ -653,15 +752,16 @@ async def _admin_beli_langsung(update, context, quantity: int, product_id: str =
         return ConversationHandler.END
 
     order_id = db.generate_order_id()
-    reply = build_success_message(order_id, quantity, result, product_name=pname)
     db.increment_sold_count(quantity)
 
-    # Gunakan send_long_message untuk handle pesan yang mungkin sangat panjang
-    await send_long_message(
+    # Kirim data produk (file .txt jika > 5, pesan teks jika <= 5)
+    await send_product_delivery(
         context.bot,
         chat_id=uid,
-        text=reply,
-        parse_mode="HTML",
+        order_id=order_id,
+        quantity=quantity,
+        result=result,
+        product_name=pname,
     )
     # Hapus pesan loading setelah produk terkirim
     try:
@@ -1165,15 +1265,14 @@ async def admin_approve_order(update: Update, context: ContextTypes.DEFAULT_TYPE
     db.update_order_status(order_id, "delivered")
     db.increment_sold_count(order["quantity"])
 
-    # Format data produk (harga API disembunyikan dari reseller)
-    produk_text = build_success_message(order_id, order["quantity"], result, product_name=prod_name)
-
-    # Kirim produk ke reseller
-    await send_long_message(
+    # Kirim produk ke reseller (file .txt jika > 5, pesan teks jika <= 5)
+    await send_product_delivery(
         context.bot,
         chat_id=order["telegram_id"],
-        text=produk_text,
-        parse_mode="HTML",
+        order_id=order_id,
+        quantity=order["quantity"],
+        result=result,
+        product_name=prod_name,
     )
 
     # Notifikasi sukses ke admin
@@ -1308,12 +1407,13 @@ async def cek_pembayaran(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.increment_sold_count(order["quantity"])
 
         prod_name = order.get("product_name") or PRODUCT_NAME
-        produk_text = build_success_message(order_id, order["quantity"], api_result, product_name=prod_name)
-        await send_long_message(
+        await send_product_delivery(
             context.bot,
             chat_id=order["telegram_id"],
-            text=produk_text,
-            parse_mode="HTML",
+            order_id=order_id,
+            quantity=order["quantity"],
+            result=api_result,
+            product_name=prod_name,
             reply_markup=get_keyboard(order["telegram_id"]),
         )
 
