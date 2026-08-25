@@ -164,7 +164,7 @@ def generate_order_id() -> str:
 
 
 def create_order(telegram_id: int, name: str, quantity: int, total_price: int, username: str = "",
-                 product_id: str = "", product_name: str = "") -> str:
+                 product_id: str = "", product_name: str = "", unique_code: int = 0) -> str:
     """
     Buat order baru dengan status 'pending'.
     Return order_id.
@@ -181,6 +181,7 @@ def create_order(telegram_id: int, name: str, quantity: int, total_price: int, u
         "username": username,
         "quantity": quantity,
         "total_price": total_price,
+        "unique_code": unique_code,
         "product_id": product_id,
         "product_name": product_name,
         "status": "pending",  # pending -> paid -> delivered / rejected
@@ -253,6 +254,27 @@ def get_setting(key: str, default=None):
     """Ambil nilai setting."""
     db = _load()
     return db["settings"].get(key, default)
+
+def generate_unique_code() -> int:
+    """
+    Buat kode unik 1-3 digit (100-999) untuk membedakan transfer manual.
+    Pastikan tidak ada kode yang sama yang masih pending.
+    """
+    import random as _random
+    db = _load()
+    # Ambil semua unique_code yang masih pending
+    used_codes = {
+        o.get("unique_code", 0)
+        for o in db["orders"].values()
+        if o.get("status") == "pending" and o.get("unique_code", 0) > 0
+    }
+    # Generate kode 100-999 yang belum dipakai
+    for _ in range(100):
+        code = _random.randint(100, 999)
+        if code not in used_codes:
+            return code
+    # Fallback: return random saja
+    return _random.randint(100, 999)
 
 
 def set_setting(key: str, value):

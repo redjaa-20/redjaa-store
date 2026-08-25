@@ -770,9 +770,18 @@ async def _reseller_buat_order(update, context, quantity: int, method: str = "ma
         harga = db.get_reseller_price(uid, PRICE_PER_UNIT)
     else:
         harga = db.get_general_price(PRICE_PER_UNIT)
-    total = quantity * harga
+    subtotal = quantity * harga
+
+    # Metode manual → tambahkan kode unik (100-999) untuk membedakan transfer
+    unique_code = 0
+    total = subtotal
+    if method == "manual":
+        unique_code = db.generate_unique_code()
+        total = subtotal + unique_code
+
     order_id = db.create_order(uid, name, quantity, total, username=user.username or "",
-                               product_id=prod_id, product_name=prod_name)
+                               product_id=prod_id, product_name=prod_name,
+                               unique_code=unique_code)
 
     # ================================================================
     # METODE OTOMATIS (Pakasir) → kirim QRIS image + URL pembayaran + cek status
@@ -878,16 +887,32 @@ async def _reseller_buat_order(update, context, quantity: int, method: str = "ma
     # ================================================================
     await context.bot.send_chat_action(chat_id=uid, action="upload_photo")
 
-    caption = (
-        f"🧾 <b>Order Dibuat</b>\n\n"
-        f"🔹 Order ID : <code>{order_id}</code>\n"
-        f"🔹 Produk   : {prod_name}\n"
-        f"🔹 Jumlah   : {quantity}\n"
-        f"🔹 Total    : <b>{currency.format_idr(total)}</b>\n\n"
-        f"📲 <b>Silakan scan QRIS di atas untuk membayar.</b>\n"
-        f"Setelah membayar, <b>kirim foto bukti transfer</b> ke chat ini.\n\n"
-        f"⏳ Pesanan akan diproses setelah admin memverifikasi bukti pembayaran."
-    )
+    if unique_code > 0:
+        caption = (
+            f"🧾 <b>Order Dibuat</b>\n\n"
+            f"🔹 Order ID : <code>{order_id}</code>\n"
+            f"🔹 Produk   : {prod_name}\n"
+            f"🔹 Jumlah   : {quantity}\n"
+            f"🔹 Subtotal : {currency.format_idr(subtotal)}\n"
+            f"🔹 Kode Unik : <b>+{unique_code}</b>\n"
+            f"🔹 Total Bayar : <b>{currency.format_idr(total)}</b>\n\n"
+            f"📲 <b>Silakan scan QRIS di atas untuk membayar.</b>\n"
+            f"⚠️ Transfer <b>tepat</b> sebesar <b>{currency.format_idr(total)}</b> "
+            f"(termasuk kode unik <b>{unique_code}</b>).\n\n"
+            f"Setelah membayar, <b>kirim foto bukti transfer</b> ke chat ini.\n\n"
+            f"⏳ Pesanan akan diproses setelah admin memverifikasi bukti pembayaran."
+        )
+    else:
+        caption = (
+            f"🧾 <b>Order Dibuat</b>\n\n"
+            f"🔹 Order ID : <code>{order_id}</code>\n"
+            f"🔹 Produk   : {prod_name}\n"
+            f"🔹 Jumlah   : {quantity}\n"
+            f"🔹 Total    : <b>{currency.format_idr(total)}</b>\n\n"
+            f"📲 <b>Silakan scan QRIS di atas untuk membayar.</b>\n"
+            f"Setelah membayar, <b>kirim foto bukti transfer</b> ke chat ini.\n\n"
+            f"⏳ Pesanan akan diproses setelah admin memverifikasi bukti pembayaran."
+        )
 
     confirm_kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("❌ Batalkan Order", callback_data=f"cancel_{order_id}")],
@@ -984,12 +1009,20 @@ async def reseller_kirim_bukti(update: Update, context: ContextTypes.DEFAULT_TYP
     db.update_order_status(order_id, "paid")
 
     # Beri tahu reseller
-    await update.message.reply_text(
+    bukti_text = (
         f"✅ <b>Bukti pembayaran diterima!</b>\n\n"
         f"🔹 Order ID : <code>{order_id}</code>\n"
-        f"🔹 Total    : <b>{currency.format_idr(order['total_price'])}</b>\n\n"
-        f"⏳ Pembayaran Anda sedang diverifikasi admin.\n"
-        f"Produk akan dikirim setelah dikonfirmasi.",
+        f"🔹 Total    : <b>{currency.format_idr(order['total_price'])}</b>\n"
+    )
+    if order.get("unique_code", 0) > 0:
+        bukti_text += f"🔹 Kode Unik : {order['unique_code']}\n"
+    bukti_text += (
+        f"\n⏳ Pembayaran Anda sedang diverifikasi admin.\n"
+        f"Produk akan dikirim setelah dikonfirmasi."
+    )
+
+    await update.message.reply_text(
+        bukti_text,
         parse_mode="HTML",
         reply_markup=get_keyboard(uid),
     )
@@ -1001,21 +1034,28 @@ async def reseller_kirim_bukti(update: Update, context: ContextTypes.DEFAULT_TYP
             InlineKeyboardButton("❌ Tolak", callback_data=f"reject_{order_id}"),
         ],
     ])
+
+    admin_caption = (
+        f"🔔 <b>Konfirmasi Pembayaran Baru</b>\n\n"
+        f"🔹 Order ID : <code>{order_id}</code>\n"
+        f"🔹 Reseller : {order['name']}\n"
+        f"🔹 Username : {'@' + order['username'] if order.get('username') else '-'}\n"
+        f"🔹 ID TG    : <code>{order['telegram_id']}</code>\n"
+        f"🔹 Produk   : {order.get('product_name') or PRODUCT_NAME}\n"
+        f"🔹 Jumlah   : {order['quantity']}\n"
+        f"🔹 Total    : <b>{currency.format_idr(order['total_price'])}</b>\n"
+    )
+    if order.get("unique_code", 0) > 0:
+        admin_caption += f"🔹 Kode Unik : {order['unique_code']}\n"
+    admin_caption += (
+        f"🔹 Waktu    : {order['created_at']}\n\n"
+        f"📸 Cek bukti transfer di atas, lalu konfirmasi atau tolak."
+    )
+
     await context.bot.send_photo(
         chat_id=ADMIN_ID,
         photo=photo.file_id,
-        caption=(
-            f"🔔 <b>Konfirmasi Pembayaran Baru</b>\n\n"
-            f"🔹 Order ID : <code>{order_id}</code>\n"
-            f"🔹 Reseller : {order['name']}\n"
-            f"🔹 Username : {'@' + order['username'] if order.get('username') else '-'}\n"
-            f"🔹 ID TG    : <code>{order['telegram_id']}</code>\n"
-            f"🔹 Produk   : {order.get('product_name') or PRODUCT_NAME}\n"
-            f"🔹 Jumlah   : {order['quantity']}\n"
-            f"🔹 Total    : <b>{currency.format_idr(order['total_price'])}</b>\n"
-            f"🔹 Waktu    : {order['created_at']}\n\n"
-            f"📸 Cek bukti transfer di atas, lalu konfirmasi atau tolak."
-        ),
+        caption=admin_caption,
         parse_mode="HTML",
         reply_markup=admin_kb,
     )
@@ -1134,20 +1174,26 @@ async def admin_approve_order(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
     # Notifikasi sukses ke admin
+    admin_success_text = (
+        f"✅ <b>Order Sukses (Manual)</b>\n\n"
+        f"🔹 Order ID : <code>{order_id}</code>\n"
+        f"🔹 Reseller : {order['name']}\n"
+        f"🔹 Username : {'@' + order['username'] if order.get('username') else '-'}\n"
+        f"🔹 ID TG    : <code>{order['telegram_id']}</code>\n"
+        f"🔹 Produk   : {prod_name}\n"
+        f"🔹 Jumlah   : {order['quantity']} unit\n"
+        f"🔹 Total    : <b>{currency.format_idr(order['total_price'])}</b>\n"
+    )
+    if order.get("unique_code", 0) > 0:
+        admin_success_text += f"🔹 Kode Unik : {order['unique_code']}\n"
+    admin_success_text += (
+        f"🔹 Metode   : 👤 Manual\n"
+        f"🔹 Waktu    : {now_wib()}"
+    )
+
     await context.bot.send_message(
         chat_id=ADMIN_ID,
-        text=(
-            f"✅ <b>Order Sukses (Manual)</b>\n\n"
-            f"🔹 Order ID : <code>{order_id}</code>\n"
-            f"🔹 Reseller : {order['name']}\n"
-            f"🔹 Username : {'@' + order['username'] if order.get('username') else '-'}\n"
-            f"🔹 ID TG    : <code>{order['telegram_id']}</code>\n"
-            f"🔹 Produk   : {prod_name}\n"
-            f"🔹 Jumlah   : {order['quantity']} unit\n"
-            f"🔹 Total    : <b>{currency.format_idr(order['total_price'])}</b>\n"
-            f"🔹 Metode   : 👤 Manual\n"
-            f"🔹 Waktu    : {now_wib()}"
-        ),
+        text=admin_success_text,
         parse_mode="HTML",
     )
 
@@ -1739,6 +1785,9 @@ def _format_riwayat_page(orders: list, page: int, total: int) -> str:
 
         if total_price:
             text += f"💰 Total    : <code>{currency.format_idr(total_price)}</code>\n"
+        unique_code = o.get("unique_code", 0)
+        if unique_code > 0:
+            text += f"🔑 Kode Unik : {unique_code}\n"
 
         text += f"📊 Status   : <b>{status}</b>\n"
         text += f"🕐 Waktu    : {created}\n"
