@@ -97,7 +97,7 @@ def admin_keyboard():
     """Keyboard untuk Admin."""
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🛒 Gemini"), KeyboardButton("📦 Products")],
+            [KeyboardButton("🛒 Beli Gemini Pro"), KeyboardButton("📦 Products")],
             [KeyboardButton("💰 Cek Saldo"), KeyboardButton("🏷️ Atur Harga")],
             [KeyboardButton("🔑 Buat Kode Reseller"), KeyboardButton("📋 Daftar Reseller")],
             [KeyboardButton("📜 Riwayat"), KeyboardButton("👤 Info Akun")],
@@ -111,8 +111,7 @@ def user_keyboard():
     """Keyboard untuk User biasa."""
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🛒 Gemini")],
-            [KeyboardButton("📝 Daftar Reseller")],
+            [KeyboardButton("🛒 Beli Gemini Pro")],
             [KeyboardButton("👤 Info Akun"), KeyboardButton("🆘 Support")],
         ],
         resize_keyboard=True,
@@ -123,7 +122,7 @@ def reseller_keyboard():
     """Keyboard untuk Reseller."""
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🛒 Gemini")],
+            [KeyboardButton("🛒 Beli Gemini Pro")],
             [KeyboardButton("👤 Info Akun"), KeyboardButton("🆘 Support")],
         ],
         resize_keyboard=True,
@@ -1991,7 +1990,6 @@ async def main():
     start_handler = ConversationHandler(
         entry_points=[
             CommandHandler("start", start),
-            MessageHandler(filters.Regex("^📝 Daftar Reseller$"), daftar_reseller_user),
         ],
         states={
             REGISTER_CODE: [
@@ -2010,7 +2008,7 @@ async def main():
     # --- ConversationHandler: BELI ---
     beli_handler = ConversationHandler(
         entry_points=[
-            MessageHandler(filters.Regex("^🛒 Gemini$"), beli_start),
+            MessageHandler(filters.Regex("^🛒 Beli Gemini Pro$"), beli_start),
             CommandHandler("beli", beli_start),
             MessageHandler(filters.Regex("^[0-9]+$"), pilih_produk),
         ],
@@ -2018,8 +2016,8 @@ async def main():
             INPUT_QTY: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND & ~filters.Regex("^❌ Batal$")
-                    & ~filters.Regex("^💰 Cek Saldo$") & ~filters.Regex("^👤 Info Akun$")
-                    & ~filters.Regex("^🔑 Buat Kode Reseller$") & ~filters.Regex("^📋 Daftar Reseller$")
+                    & ~filters.Regex("^🛒 Beli Gemini Pro$") & ~filters.Regex("^💰 Cek Saldo$")
+                    & ~filters.Regex("^👤 Info Akun$") & ~filters.Regex("^🔑 Buat Kode Reseller$") & ~filters.Regex("^📋 Daftar Reseller$")
                     & ~filters.Regex("^🆘 Support$") & ~filters.Regex("^📜 Riwayat$")
                     & ~filters.Regex("^📦 Products$")
                     & ~filters.Regex("^⬅️ Prev$") & ~filters.Regex("^➡️ Next$")
@@ -2039,7 +2037,7 @@ async def main():
             MessageHandler(filters.Regex("^📋 Daftar Reseller$"), beli_to_daftar_reseller),
             MessageHandler(filters.Regex("^🆘 Support$"), beli_to_support),
             MessageHandler(filters.Regex("^📜 Riwayat$"), beli_to_riwayat),
-            MessageHandler(filters.Regex("^🛒 Gemini$"), beli_start),
+            MessageHandler(filters.Regex("^🛒 Beli Gemini Pro$"), beli_start),
             MessageHandler(filters.Regex("^📦 Products$"), beli_to_produk),
             CommandHandler("start", beli_to_start),
             CommandHandler("saldo", beli_to_saldo),
@@ -2060,7 +2058,7 @@ async def main():
                 CallbackQueryHandler(genkode_custom_prompt, pattern="^genprice_custom$"),
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND & ~filters.Regex("^❌ Batal$")
-                    & ~filters.Regex("^🛒 Gemini$") & ~filters.Regex("^💰 Cek Saldo$")
+                    & ~filters.Regex("^🛒 Beli Gemini Pro$") & ~filters.Regex("^💰 Cek Saldo$")
                     & ~filters.Regex("^👤 Info Akun$") & ~filters.Regex("^📋 Daftar Reseller$")
                     & ~filters.Regex("^🆘 Support$") & ~filters.Regex("^📜 Riwayat$")
                     & ~filters.Regex("^📦 Products$")
@@ -2076,7 +2074,7 @@ async def main():
             MessageHandler(filters.Regex("^⬅️ Prev$"), produk_prev),
             MessageHandler(filters.Regex("^➡️ Next$"), produk_next),
             MessageHandler(filters.Regex("^🏠 Kembali ke Menu Utama$"), produk_kembali_menu),
-            MessageHandler(filters.Regex("^🛒 Gemini$"), beli_to_start),
+            MessageHandler(filters.Regex("^🛒 Beli Gemini Pro$"), beli_to_start),
             MessageHandler(filters.Regex("^📦 Products$"), beli_to_produk),
             MessageHandler(filters.Regex("^💰 Cek Saldo$"), beli_to_saldo),
             MessageHandler(filters.Regex("^👤 Info Akun$"), beli_to_info),
