@@ -1,0 +1,15 @@
+{
+  "resellers": {},
+  "codes": {},
+  "orders": {},
+  "settings": {},
+  "users": {
+    "1339503074": {
+      "name": "Admin",
+      "username": "",
+      "first_seen": "21/09/2026 15:28:36",
+      "last_seen": "21/09/2026 15:28:36",
+      "interactions": 2
+    }
+  }
+}

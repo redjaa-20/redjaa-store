@@ -1,5 +1,13 @@
 .env
 __pycache__/
 *.pyc
-data.json
+# data.json
 # qris.jpg
+
+_dbg_err.txt
+_dbg_start.json
+_dbg_start.py
+
+DEPLOY_CMD.md
+DEPLOY_GITHUB.md
+DEPLOY_VPS.md

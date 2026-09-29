@@ -66,6 +66,9 @@ WAIT_BUKTI = 4
 INPUT_CUSTOM_PRICE = 3
 INPUT_CUSTOM_QTY = 5
 PILIH_METODE = 6
+BROADCAST_AUDIENCE = 7
+BROADCAST_MESSAGE = 8
+BROADCAST_CONFIRM = 9
 
 
 # ================================================================
@@ -93,6 +96,22 @@ def pakasir_configured() -> bool:
         return False
     return db.get_setting("auto_payment_enabled", True)
 
+# ================================================================
+# TRACKING USER (untuk target Broadcast Message)
+# ================================================================
+async def track_user_middleware(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Catat setiap user yang berinteraksi dengan bot.
+    Berjalan di group paling awal (-2), lalu lanjut ke handler lain.
+    """
+    user = update.effective_user
+    if user and not user.is_bot:
+        try:
+            name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+            db.track_user(user.id, name, user.username or "")
+        except Exception as e:
+            logger.warning(f"Gagal mencatat user {user.id}: {e}")
+
 
 # ================================================================
 # KEYBOARD
@@ -116,12 +135,42 @@ def admin_panel_keyboard():
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton("🔑 Buat Kode Reseller"), KeyboardButton("📋 Daftar Reseller")],
-            [KeyboardButton("📜 Riwayat")],
+            [KeyboardButton("📢 Broadcast Message"), KeyboardButton("📜 Riwayat")],
             [KeyboardButton(f"🤖 Auto Payment: {auto_status}")],
             [KeyboardButton("🔙 Kembali ke Menu")],
         ],
         resize_keyboard=True,
     )
+
+def broadcast_audience_keyboard() -> InlineKeyboardMarkup:
+    """Keyboard pilihan target broadcast."""
+    reseller_count = len(db.get_all_reseller_ids())
+    user_count = len(db.get_all_user_ids())
+    buyer_count = len(db.get_broadcast_targets("buyers"))
+
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            f"🏪 Reseller Saja ({reseller_count})",
+            callback_data="bc_aud_resellers",
+        )],
+        [InlineKeyboardButton(
+            f"🛒 Pembeli Saja ({buyer_count})",
+            callback_data="bc_aud_buyers",
+        )],
+        [InlineKeyboardButton(
+            f"👥 Semua User ({user_count + reseller_count})",
+            callback_data="bc_aud_all",
+        )],
+        [InlineKeyboardButton("❌ Batal", callback_data="bc_cancel")],
+    ])
+
+def broadcast_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Keyboard konfirmasi sebelum broadcast dikirim."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🚀 Kirim Sekarang", callback_data="bc_send")],
+        [InlineKeyboardButton("✏️ Tulis Ulang", callback_data="bc_rewrite")],
+        [InlineKeyboardButton("❌ Batal", callback_data="bc_cancel")],
+    ])
 
 
 def user_keyboard():
@@ -231,6 +280,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     uid = user.id
 
+    # Catat user untuk target broadcast
+    db.track_user(uid, f"{user.first_name} {user.last_name or ''}".strip(), user.username or "")
+
     # Admin → langsung ke menu admin
     if is_admin(uid):
         await update.message.reply_text(
@@ -279,9 +331,14 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     auto_on = db.get_setting("auto_payment_enabled", True)
     auto_status = "🟢 ON" if auto_on else "🔴 OFF"
 
+    total_user = len(db.get_all_user_ids())
+    total_reseller = len(db.get_all_reseller_ids())
+
     text = (
         f"🔧 <b>Admin Panel</b>\n\n"
-        f"┃ 🤖 Auto Payment : {auto_status}\n\n"
+        f"┃ 🤖 Auto Payment : {auto_status}\n"
+        f"┃ 👥 Total User   : {total_user}\n"
+        f"┃ 🏪 Total Reseller : {total_reseller}\n\n"
         f"Pilih menu di bawah 👇"
     )
     await update.message.reply_text(
@@ -319,6 +376,353 @@ async def admin_panel_kembali(update: Update, context: ContextTypes.DEFAULT_TYPE
         "🔙 Kembali ke menu utama.",
         reply_markup=admin_keyboard(),
     )
+
+# ================================================================
+# 📢 BROADCAST MESSAGE (Admin only)
+# ================================================================
+# Label target broadcast
+BROADCAST_LABELS = {
+    "resellers": "🏪 Reseller Saja",
+    "buyers": "🛒 Pembeli Saja",
+    "all": "👥 Semua User",
+}
+
+BROADCAST_DELAY = 0.05  # jeda antar pesan (detik) agar tidak kena rate limit
+
+def _broadcast_summary_text(audience: str, message: str) -> str:
+    """Bangun teks konfirmasi sebelum broadcast dikirim."""
+    target_count = len(db.get_broadcast_targets(audience))
+    label = BROADCAST_LABELS.get(audience, audience)
+    return (
+        f"📢 <b>Konfirmasi Broadcast</b>\n\n"
+        f"┃ 🎯 Target : {label}\n"
+        f"┃ 👥 Jumlah : <b>{target_count}</b> penerima\n\n"
+        f"📝 <b>Isi Pesan:</b>\n"
+        f"<i>(mode HTML aktif)</i>\n\n"
+        f"{message}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Kirim sekarang?"
+    )
+
+async def broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Langkah 1: Admin pilih target broadcast."""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Akses ditolak. Menu ini khusus Admin.")
+        return ConversationHandler.END
+
+    # Reset state broadcast lama
+    context.user_data.pop("bc_audience", None)
+    context.user_data.pop("bc_message", None)
+
+    total_target = len(db.get_broadcast_targets("all"))
+
+    await update.message.reply_text(
+        f"📢 <b>Broadcast Message</b>\n\n"
+        f"Kirim pesan ke banyak user sekaligus.\n"
+        f"Total target tersedia: <b>{total_target}</b> orang.\n\n"
+        f"🎯 Pilih target broadcast:",
+        parse_mode="HTML",
+        reply_markup=broadcast_audience_keyboard(),
+    )
+    return BROADCAST_AUDIENCE
+
+async def broadcast_pilih_audience(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Langkah 2: Admin pilih audience → minta isi pesan."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.from_user.id != ADMIN_ID:
+        await query.answer("⛔ Hanya admin.", show_alert=True)
+        return ConversationHandler.END
+
+    audience = query.data.replace("bc_aud_", "")
+    targets = db.get_broadcast_targets(audience)
+
+    if not targets:
+        await query.edit_message_text(
+            f"⚠️ <b>Target kosong</b>\n\n"
+            f"Tidak ada penerima untuk kategori {BROADCAST_LABELS.get(audience, audience)}.",
+            parse_mode="HTML",
+        )
+        return ConversationHandler.END
+
+    context.user_data["bc_audience"] = audience
+
+    await query.edit_message_text(
+        f"📢 <b>Broadcast Message</b>\n\n"
+        f"🎯 Target : {BROADCAST_LABELS.get(audience, audience)}\n"
+        f"👥 Jumlah : <b>{len(targets)}</b> penerima\n\n"
+        f"✍️ Kirim pesan yang ingin di-broadcast.\n"
+        f"<i>Anda bisa mengirim teks, foto dengan caption, atau video dengan caption.</i>\n\n"
+        f"💡 Format HTML didukung: <code>&lt;b&gt;tebal&lt;/b&gt;</code>, "
+        f"<code>&lt;i&gt;miring&lt;/i&gt;</code>, <code>&lt;code&gt;kode&lt;/code&gt;</code>",
+        parse_mode="HTML",
+    )
+    return BROADCAST_MESSAGE
+
+async def broadcast_terima_pesan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Langkah 3: Admin kirim isi pesan → tampilkan konfirmasi."""
+    if not is_admin(update.effective_user.id):
+        return ConversationHandler.END
+
+    audience = context.user_data.get("bc_audience")
+    if not audience:
+        await update.message.reply_text(
+            "⚠️ Sesi broadcast habis. Silakan mulai lagi dari Admin Panel.",
+            reply_markup=admin_panel_keyboard(),
+        )
+        return ConversationHandler.END
+
+    message = update.message
+    bc = {}
+
+    # Simpan sesuai tipe konten (media di-copy agar bisa dikirim ulang berkali-kali)
+    if message.photo:
+        bc = {
+            "type": "photo",
+            "file_id": message.photo[-1].file_id,
+            "caption": message.caption or "",
+            "preview": message.caption or "[Foto tanpa caption]",
+        }
+    elif message.video:
+        bc = {
+            "type": "video",
+            "file_id": message.video.file_id,
+            "caption": message.caption or "",
+            "preview": message.caption or "[Video tanpa caption]",
+        }
+    elif message.document:
+        bc = {
+            "type": "document",
+            "file_id": message.document.file_id,
+            "caption": message.caption or "",
+            "preview": message.caption or "[Dokumen tanpa caption]",
+        }
+    elif message.text:
+        bc = {
+            "type": "text",
+            "text": message.text,
+            "preview": message.text,
+        }
+    else:
+        await update.message.reply_text(
+            "❌ Tipe pesan tidak didukung. Kirim teks, foto, video, atau dokumen."
+        )
+        return BROADCAST_MESSAGE
+
+    context.user_data["bc_message"] = bc
+
+    await update.message.reply_text(
+        _broadcast_summary_text(audience, bc["preview"]),
+        parse_mode="HTML",
+        reply_markup=broadcast_confirm_keyboard(),
+    )
+    return BROADCAST_CONFIRM
+
+async def broadcast_rewrite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin ingin menulis ulang pesan broadcast."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.from_user.id != ADMIN_ID:
+        await query.answer("⛔ Hanya admin.", show_alert=True)
+        return ConversationHandler.END
+
+    context.user_data.pop("bc_message", None)
+    audience = context.user_data.get("bc_audience")
+    targets = db.get_broadcast_targets(audience) if audience else []
+
+    await query.edit_message_text(
+        f"✍️ <b>Tulis Ulang Pesan</b>\n\n"
+        f"🎯 Target : {BROADCAST_LABELS.get(audience, '-')}\n"
+        f"👥 Jumlah : <b>{len(targets)}</b> penerima\n\n"
+        f"Kirim pesan baru yang ingin di-broadcast:",
+        parse_mode="HTML",
+    )
+    return BROADCAST_MESSAGE
+
+async def broadcast_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Batalkan proses broadcast."""
+    context.user_data.pop("bc_audience", None)
+    context.user_data.pop("bc_message", None)
+
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        if query.from_user.id != ADMIN_ID:
+            await query.answer("⛔ Hanya admin.", show_alert=True)
+            return ConversationHandler.END
+        await query.edit_message_text("❌ Broadcast dibatalkan.")
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text="🔧 Kembali ke Admin Panel.",
+            reply_markup=admin_panel_keyboard(),
+        )
+    else:
+        if not is_admin(update.effective_user.id):
+            return ConversationHandler.END
+        await update.message.reply_text(
+            "❌ Broadcast dibatalkan.",
+            reply_markup=admin_panel_keyboard(),
+        )
+    return ConversationHandler.END
+
+async def _kirim_broadcast(bot, chat_id: int, bc: dict):
+    """Kirim satu pesan broadcast sesuai tipe kontennya."""
+    bc_type = bc.get("type")
+
+    if bc_type == "photo":
+        await bot.send_photo(
+            chat_id=chat_id,
+            photo=bc["file_id"],
+            caption=bc.get("caption") or None,
+            parse_mode="HTML",
+        )
+    elif bc_type == "video":
+        await bot.send_video(
+            chat_id=chat_id,
+            video=bc["file_id"],
+            caption=bc.get("caption") or None,
+            parse_mode="HTML",
+        )
+    elif bc_type == "document":
+        await bot.send_document(
+            chat_id=chat_id,
+            document=bc["file_id"],
+            caption=bc.get("caption") or None,
+            parse_mode="HTML",
+        )
+    else:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=bc["text"],
+            parse_mode="HTML",
+        )
+
+async def broadcast_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Langkah 4: Kirim broadcast ke semua target."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.from_user.id != ADMIN_ID:
+        await query.answer("⛔ Hanya admin.", show_alert=True)
+        return ConversationHandler.END
+
+    audience = context.user_data.get("bc_audience")
+    bc = context.user_data.get("bc_message")
+
+    if not audience or not bc:
+        await query.edit_message_text(
+            "⚠️ Data broadcast tidak ditemukan. Silakan mulai lagi dari Admin Panel."
+        )
+        return ConversationHandler.END
+
+    targets = db.get_broadcast_targets(audience)
+    if not targets:
+        await query.edit_message_text("⚠️ Tidak ada penerima. Broadcast dibatalkan.")
+        return ConversationHandler.END
+
+    label = BROADCAST_LABELS.get(audience, audience)
+    total = len(targets)
+
+    await query.edit_message_text(
+        f"🚀 <b>Mengirim broadcast...</b>\n\n"
+        f"🎯 Target : {label}\n"
+        f"👥 Total  : <b>{total}</b> penerima\n"
+        f"📤 Terkirim : <b>0</b>\n"
+        f"❌ Gagal    : <b>0</b>",
+        parse_mode="HTML",
+    )
+
+    sent = 0
+    failed = 0
+    failed_ids = []
+    last_update = 0
+    # Update progress tiap 10% atau tiap 10 pesan (mana yang lebih dulu)
+    update_every = max(1, min(10, total // 10 or 1))
+
+    for idx, tid in enumerate(targets, 1):
+        try:
+            await _kirim_broadcast(context.bot, tid, bc)
+            sent += 1
+        except Exception as e:
+            failed += 1
+            failed_ids.append(tid)
+            logger.warning(f"Broadcast gagal ke {tid}: {e}")
+
+        # Update progress berkala
+        if idx - last_update >= update_every:
+            last_update = idx
+            try:
+                await query.edit_message_text(
+                    f"🚀 <b>Mengirim broadcast...</b>\n\n"
+                    f"🎯 Target : {label}\n"
+                    f"👥 Total  : <b>{total}</b> penerima\n"
+                    f"📤 Terkirim : <b>{sent}</b>\n"
+                    f"❌ Gagal    : <b>{failed}</b>\n\n"
+                    f"⏳ Progress : {idx}/{total}",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                # Abaikan error edit (misal rate limit)
+                pass
+
+        await asyncio.sleep(BROADCAST_DELAY)
+
+    # Simpan log broadcast
+    db.save_broadcast_log(audience, bc["preview"], sent, failed)
+
+    result_text = (
+        f"✅ <b>Broadcast Selesai!</b>\n\n"
+        f"🎯 Target   : {label}\n"
+        f"👥 Total    : <b>{total}</b> penerima\n"
+        f"📤 Terkirim : <b>{sent}</b>\n"
+        f"❌ Gagal    : <b>{failed}</b>\n"
+        f"🕐 Waktu    : {now_wib()}"
+    )
+    if failed_ids:
+        result_text += (
+            f"\n\n⚠️ <i>{failed} penerima gagal dikirimi pesan."
+            f"</i>\n<i>(kemungkinan memblokir bot atau belum pernah chat)</i>"
+        )
+
+    await query.edit_message_text(result_text, parse_mode="HTML")
+
+    # Kembalikan keyboard Admin Panel
+    await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text="🔧 Kembali ke Admin Panel.",
+        reply_markup=admin_panel_keyboard(),
+    )
+
+    context.user_data.pop("bc_audience", None)
+    context.user_data.pop("bc_message", None)
+    return ConversationHandler.END
+
+async def broadcast_send_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin kirim teks saat di state konfirmasi → arahkan kembali ke tulis pesan."""
+    if not is_admin(update.effective_user.id):
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        "⚠️ Gunakan tombol di atas: <b>🚀 Kirim Sekarang</b> atau <b>✏️ Tulis Ulang</b>.",
+        parse_mode="HTML",
+    )
+    return BROADCAST_CONFIRM
+
+async def broadcast_to_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Navigasi dari broadcast conversation ke Admin Panel / menu lain."""
+    context.user_data.pop("bc_audience", None)
+    context.user_data.pop("bc_message", None)
+    await admin_panel(update, context)
+    return ConversationHandler.END
+
+async def broadcast_to_riwayat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Navigasi dari broadcast conversation ke Riwayat."""
+    context.user_data.pop("bc_audience", None)
+    context.user_data.pop("bc_message", None)
+    await riwayat_pembelian(update, context)
+    return ConversationHandler.END
 
 async def daftar_reseller_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """User biasa daftar jadi reseller → minta kode reseller."""
@@ -2277,6 +2681,7 @@ async def set_bot_commands(app: Application):
         BotCommand("produk", "Lihat daftar produk"),
         BotCommand("info", "Info akun Anda"),
         BotCommand("riwayat", "Riwayat pembelian"),
+        BotCommand("broadcast", "Broadcast pesan ke user (Admin)"),
         BotCommand("support", "Hubungi admin"),
     ]
     await app.bot.set_my_commands(commands)
@@ -2357,6 +2762,7 @@ async def main():
                     & ~filters.Regex("^🔙 Kembali ke Menu$")
                     & ~filters.Regex("^⬅️ Prev$") & ~filters.Regex("^➡️ Next$")
                     & ~filters.Regex("^🏠 Kembali ke Menu Utama$")
+                    & ~filters.Regex("^📢 Broadcast Message$")
                    ,
                     beli_qty,
                 ),
@@ -2365,6 +2771,7 @@ async def main():
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND & ~filters.Regex("^❌ Batal$")
                     & ~filters.Regex("^🔧 Admin Panel$") & ~filters.Regex("^🤖 Auto Payment:")
+                    & ~filters.Regex("^📢 Broadcast Message$")
                     & ~filters.Regex("^🔙 Kembali ke Menu$"),
                     beli_custom_qty,
                 ),
@@ -2379,7 +2786,8 @@ async def main():
                     & ~filters.Regex("^🔧 Admin Panel$") & ~filters.Regex("^🤖 Auto Payment:")
                     & ~filters.Regex("^🔙 Kembali ke Menu$")
                     & ~filters.Regex("^⬅️ Prev$") & ~filters.Regex("^➡️ Next$")
-                    & ~filters.Regex("^🏠 Kembali ke Menu Utama$"),
+                    & ~filters.Regex("^🏠 Kembali ke Menu Utama$")
+                    & ~filters.Regex("^📢 Broadcast Message$"),
                     pilih_metode_reply,
                 ),
             ],
@@ -2394,6 +2802,7 @@ async def main():
             MessageHandler(filters.Regex("^📋 Daftar Reseller$"), beli_to_daftar_reseller),
             MessageHandler(filters.Regex("^🆘 Support$"), beli_to_support),
             MessageHandler(filters.Regex("^📜 Riwayat$"), beli_to_riwayat),
+            MessageHandler(filters.Regex("^📢 Broadcast Message$"), broadcast_start),
             MessageHandler(filters.Regex("^🛒 Beli Gemini Pro$"), beli_start),
             MessageHandler(filters.Regex("^📦 Products$"), beli_to_produk),
             CommandHandler("start", beli_to_start),
@@ -2423,6 +2832,7 @@ async def main():
                     & ~filters.Regex("^🔙 Kembali ke Menu$")
                     & ~filters.Regex("^⬅️ Prev$") & ~filters.Regex("^➡️ Next$")
                     & ~filters.Regex("^🏠 Kembali ke Menu Utama$")
+                    & ~filters.Regex("^📢 Broadcast Message$")
                    ,
                     genkode_custom_input,
                 ),
@@ -2440,6 +2850,7 @@ async def main():
             MessageHandler(filters.Regex("^📋 Daftar Reseller$"), beli_to_daftar_reseller),
             MessageHandler(filters.Regex("^🆘 Support$"), beli_to_support),
             MessageHandler(filters.Regex("^📜 Riwayat$"), beli_to_riwayat),
+            MessageHandler(filters.Regex("^📢 Broadcast Message$"), broadcast_start),
             MessageHandler(filters.Regex("^🔑 Buat Kode Reseller$"), buat_kode_reseller),
             CommandHandler("start", beli_to_start),
             CommandHandler("saldo", beli_to_saldo),
@@ -2449,7 +2860,80 @@ async def main():
         ],
     )
 
+    # --- ConversationHandler: BROADCAST MESSAGE (Admin) ---
+    broadcast_handler = ConversationHandler(
+        entry_points=[
+            MessageHandler(filters.Regex("^📢 Broadcast Message$"), broadcast_start),
+            CommandHandler("broadcast", broadcast_start),
+        ],
+        states={
+            BROADCAST_AUDIENCE: [
+                CallbackQueryHandler(broadcast_pilih_audience, pattern="^bc_aud_"),
+                CallbackQueryHandler(broadcast_cancel, pattern="^bc_cancel$"),
+            ],
+            BROADCAST_MESSAGE: [
+                MessageHandler(
+                    (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.Document.ALL)
+                    & ~filters.COMMAND
+                    & ~filters.Regex("^❌ Batal$")
+                    & ~filters.Regex("^🔧 Admin Panel$")
+                    & ~filters.Regex("^📢 Broadcast Message$")
+                    & ~filters.Regex("^📜 Riwayat$")
+                    & ~filters.Regex("^📋 Daftar Reseller$")
+                    & ~filters.Regex("^🔑 Buat Kode Reseller$")
+                    & ~filters.Regex("^🛒 Beli Gemini Pro$")
+                    & ~filters.Regex("^💰 Cek Saldo$")
+                    & ~filters.Regex("^📦 Products$")
+                    & ~filters.Regex("^👤 Info Akun$")
+                    & ~filters.Regex("^🆘 Support$")
+                    & ~filters.Regex("^🏷️ Atur Harga$")
+                    & ~filters.Regex("^🤖 Auto Payment:")
+                    & ~filters.Regex("^🔙 Kembali ke Menu$")
+                    & ~filters.Regex("^🏠 Kembali ke Menu Utama$")
+                    & ~filters.Regex("^⬅️ Prev$") & ~filters.Regex("^➡️ Next$"),
+                    broadcast_terima_pesan,
+                ),
+                CallbackQueryHandler(broadcast_cancel, pattern="^bc_cancel$"),
+            ],
+            BROADCAST_CONFIRM: [
+                CallbackQueryHandler(broadcast_send, pattern="^bc_send$"),
+                CallbackQueryHandler(broadcast_rewrite, pattern="^bc_rewrite$"),
+                CallbackQueryHandler(broadcast_cancel, pattern="^bc_cancel$"),
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND &
+                    ~filters.Regex("^🔧 Admin Panel$") &
+                    ~filters.Regex("^📢 Broadcast Message$") &
+                    ~filters.Regex("^📜 Riwayat$") &
+                    ~filters.Regex("^📋 Daftar Reseller$") &
+                    ~filters.Regex("^🔑 Buat Kode Reseller$") &
+                    ~filters.Regex("^🛒 Beli Gemini Pro$") &
+                    ~filters.Regex("^💰 Cek Saldo$") &
+                    ~filters.Regex("^📦 Products$") &
+                    ~filters.Regex("^👤 Info Akun$") &
+                    ~filters.Regex("^🆘 Support$") &
+                    ~filters.Regex("^🏷️ Atur Harga$") &
+                    ~filters.Regex("^🤖 Auto Payment:") &
+                    ~filters.Regex("^🔙 Kembali ke Menu$") &
+                    ~filters.Regex("^🏠 Kembali ke Menu Utama$"),
+                    broadcast_send_fallback,
+                ),
+            ],
+        },
+        fallbacks=[
+            MessageHandler(filters.Regex("^❌ Batal$"), broadcast_cancel),
+            MessageHandler(filters.Regex("^🔧 Admin Panel$"), broadcast_to_admin_panel),
+            MessageHandler(filters.Regex("^📜 Riwayat$"), broadcast_to_riwayat),
+            CommandHandler("start", beli_to_start),
+            CommandHandler("broadcast", broadcast_start),
+        ],
+    )
+
     # --- Daftarkan Handlers (urutan penting!) ---
+    # Middleware tracking user (paling awal, group -2)
+    app.add_handler(
+        MessageHandler(filters.ALL, track_user_middleware),
+        group=-2,
+    )
     # Handler input harga (harus sebelum conversation handler agar teks tertangkap)
     app.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_price_input),
@@ -2463,6 +2947,7 @@ async def main():
     app.add_handler(start_handler)
     app.add_handler(beli_handler)
     app.add_handler(kode_handler)
+    app.add_handler(broadcast_handler)
     app.add_handler(CommandHandler("saldo", cek_saldo))
     app.add_handler(CommandHandler("info", info_akun))
     app.add_handler(MessageHandler(filters.Regex("^💰 Cek Saldo$"), cek_saldo))

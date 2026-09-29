@@ -1,0 +1,328 @@
+{
+  "resellers": {
+    "6237310794": {
+      "name": "MoS・ArkOneシ",
+      "registered_at": "15/07/2026 13:23:13",
+      "code_used": "6Z28EGKI",
+      "price": 35000
+    }
+  },
+  "codes": {
+    "6Z28EGKI": {
+      "created_at": "15/07/2026 13:22:19",
+      "used": true,
+      "used_by": 6237310794,
+      "price": 35000
+    }
+  },
+  "orders": {
+    "ORD260715132319": {
+      "telegram_id": 6237310794,
+      "name": "MoS・ArkOneシ",
+      "quantity": 1,
+      "total_price": 35000,
+      "status": "paid",
+      "created_at": "15/07/2026 13:23:19",
+      "confirmed_at": null
+    },
+    "RED-100826-004": {
+      "telegram_id": 1297568383,
+      "name": "Faizal Djau MA-PT Gto",
+      "username": "faizaldjau",
+      "quantity": 2,
+      "total_price": 70000,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "paid",
+      "created_at": "10/08/2026 12:43:36",
+      "confirmed_at": null
+    },
+    "RED-100826-005": {
+      "telegram_id": 1297568383,
+      "name": "Faizal Djau MA-PT Gto",
+      "username": "faizaldjau",
+      "quantity": 2,
+      "total_price": 70000,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "delivered",
+      "created_at": "10/08/2026 13:23:25",
+      "confirmed_at": "10/08/2026 13:27:45"
+    },
+    "RED-140826-002": {
+      "telegram_id": 1297568383,
+      "name": "Faizal Djau MA-PT Gto",
+      "username": "faizaldjau",
+      "quantity": 1,
+      "total_price": 35000,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "pending",
+      "created_at": "14/08/2026 16:03:55",
+      "confirmed_at": null
+    },
+    "RED-140826-003": {
+      "telegram_id": 1297568383,
+      "name": "Faizal Djau MA-PT Gto",
+      "username": "faizaldjau",
+      "quantity": 1,
+      "total_price": 35000,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "delivered",
+      "created_at": "14/08/2026 16:04:02",
+      "confirmed_at": "14/08/2026 16:38:58"
+    },
+    "RED-170826-001": {
+      "telegram_id": 1297568383,
+      "name": "Faizal Djau MA-PT Gto",
+      "username": "faizaldjau",
+      "quantity": 1,
+      "total_price": 35000,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "delivered",
+      "created_at": "17/08/2026 14:32:21",
+      "confirmed_at": "17/08/2026 14:33:10"
+    },
+    "RED-230826-007": {
+      "telegram_id": 1297568383,
+      "name": "Faizal Djau MA-PT Gto",
+      "username": "faizaldjau",
+      "quantity": 1,
+      "total_price": 35000,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "rejected",
+      "created_at": "23/08/2026 19:59:01",
+      "confirmed_at": "23/08/2026 19:59:03"
+    },
+    "RED-270826-001": {
+      "telegram_id": 1245654963,
+      "name": "N",
+      "username": "nichookin",
+      "quantity": 1,
+      "total_price": 35000,
+      "unique_code": 0,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "rejected",
+      "created_at": "27/08/2026 01:44:50",
+      "confirmed_at": "27/08/2026 01:44:52"
+    },
+    "RED-270826-002": {
+      "telegram_id": 1245654963,
+      "name": "N",
+      "username": "nichookin",
+      "quantity": 1,
+      "total_price": 35000,
+      "unique_code": 0,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "rejected",
+      "created_at": "27/08/2026 01:45:00",
+      "confirmed_at": "27/08/2026 01:45:02"
+    },
+    "RED-270826-003": {
+      "telegram_id": 1245654963,
+      "name": "N",
+      "username": "nichookin",
+      "quantity": 1,
+      "total_price": 35088,
+      "unique_code": 88,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "rejected",
+      "created_at": "27/08/2026 01:45:11",
+      "confirmed_at": "27/08/2026 05:25:00"
+    },
+    "RED-290826-001": {
+      "telegram_id": 1563159530,
+      "name": "Isaan",
+      "username": "Ihsan0988",
+      "quantity": 1,
+      "total_price": 35000,
+      "unique_code": 0,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "rejected",
+      "created_at": "29/08/2026 09:54:41",
+      "confirmed_at": "29/08/2026 09:54:43"
+    },
+    "RED-290826-002": {
+      "telegram_id": 8768017431,
+      "name": "Altarh",
+      "username": "altarh77",
+      "quantity": 1,
+      "total_price": 35000,
+      "unique_code": 0,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "rejected",
+      "created_at": "29/08/2026 09:54:52",
+      "confirmed_at": "29/08/2026 09:54:55"
+    },
+    "RED-290826-003": {
+      "telegram_id": 8768017431,
+      "name": "Altarh",
+      "username": "altarh77",
+      "quantity": 1,
+      "total_price": 35131,
+      "unique_code": 131,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "rejected",
+      "created_at": "29/08/2026 09:55:07",
+      "confirmed_at": "29/08/2026 10:00:35"
+    },
+    "RED-290826-005": {
+      "telegram_id": 8768017431,
+      "name": "Altarh",
+      "username": "altarh77",
+      "quantity": 10,
+      "total_price": 350000,
+      "unique_code": 0,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "rejected",
+      "created_at": "29/08/2026 10:01:36",
+      "confirmed_at": "29/08/2026 10:01:38"
+    },
+    "RED-290826-007": {
+      "telegram_id": 8768017431,
+      "name": "Altarh",
+      "username": "altarh77",
+      "quantity": 1,
+      "total_price": 9000,
+      "unique_code": 0,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "rejected",
+      "created_at": "29/08/2026 10:35:06",
+      "confirmed_at": "29/08/2026 10:35:08"
+    },
+    "RED-290826-008": {
+      "telegram_id": 8768017431,
+      "name": "Altarh",
+      "username": "altarh77",
+      "quantity": 1,
+      "total_price": 9115,
+      "unique_code": 115,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "rejected",
+      "created_at": "29/08/2026 10:35:18",
+      "confirmed_at": "29/08/2026 10:35:31"
+    },
+    "RED-290826-009": {
+      "telegram_id": 8768017431,
+      "name": "Altarh",
+      "username": "altarh77",
+      "quantity": 1,
+      "total_price": 9000,
+      "unique_code": 0,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "rejected",
+      "created_at": "29/08/2026 11:06:55",
+      "confirmed_at": "29/08/2026 11:06:57"
+    },
+    "RED-290826-010": {
+      "telegram_id": 8768017431,
+      "name": "Altarh",
+      "username": "altarh77",
+      "quantity": 1,
+      "total_price": 9041,
+      "unique_code": 41,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "pending",
+      "created_at": "29/08/2026 11:07:06",
+      "confirmed_at": null
+    },
+    "RED-290826-012": {
+      "telegram_id": 1246777572,
+      "name": "Fariz",
+      "username": "FarizXg12",
+      "quantity": 1,
+      "total_price": 9019,
+      "unique_code": 19,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "rejected",
+      "created_at": "29/08/2026 11:36:36",
+      "confirmed_at": "29/08/2026 11:36:41"
+    },
+    "RED-280926-002": {
+      "telegram_id": 6117684303,
+      "name": "Fahmi",
+      "username": "Fahmi119",
+      "quantity": 1,
+      "total_price": 9000,
+      "unique_code": 0,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "rejected",
+      "created_at": "28/09/2026 15:38:46",
+      "confirmed_at": "28/09/2026 15:38:48"
+    },
+    "RED-280926-003": {
+      "telegram_id": 6117684303,
+      "name": "Fahmi",
+      "username": "Fahmi119",
+      "quantity": 1,
+      "total_price": 9119,
+      "unique_code": 119,
+      "product_id": "6a31035939dc014325da2c66",
+      "product_name": "Gemini Pro 18 Months",
+      "status": "rejected",
+      "created_at": "28/09/2026 15:39:06",
+      "confirmed_at": "28/09/2026 16:42:10"
+    }
+  },
+  "settings": {
+    "qris_file_id": "AgACAgUAAxkDAANFalcEVokqxdXJyI_hM8nI8dAUcqQAAlYWaxv6ErhWoEiwV3uF8j4BAAMCAAN5AAM9BA",
+    "order_counters": {
+      "290926": 1
+    },
+    "sold_count": 523,
+    "general_price": 9000
+  },
+  "users": {
+    "1339503074": {
+      "name": "Redjaa",
+      "username": "redjaa20",
+      "first_seen": "23/09/2026 12:45:39",
+      "last_seen": "29/09/2026 11:39:44",
+      "interactions": 37
+    },
+    "5952199956": {
+      "name": "Eno",
+      "username": "",
+      "first_seen": "28/09/2026 10:48:51",
+      "last_seen": "28/09/2026 10:48:51",
+      "interactions": 2
+    },
+    "6117684303": {
+      "name": "Fahmi",
+      "username": "Fahmi119",
+      "first_seen": "28/09/2026 15:35:34",
+      "last_seen": "28/09/2026 15:41:20",
+      "interactions": 12
+    },
+    "8400229757": {
+      "name": "A.I.T Corp (cek profil)",
+      "username": "ArdiDev",
+      "first_seen": "29/09/2026 11:38:27",
+      "last_seen": "29/09/2026 11:38:27",
+      "interactions": 1
+    },
+    "566853543": {
+      "name": "F 😄",
+      "username": "Fahrunyasha",
+      "first_seen": "29/09/2026 11:38:28",
+      "last_seen": "29/09/2026 11:38:29",
+      "interactions": 3
+    }
+  }
+}

@@ -15,7 +15,7 @@ DB_FILE = "data.json"
 def _load() -> dict:
     """Load database dari file."""
     if not os.path.exists(DB_FILE):
-        return {"resellers": {}, "codes": {}, "orders": {}, "settings": {}}
+        return {"resellers": {}, "codes": {}, "orders": {}, "settings": {}, "users": {}}
     with open(DB_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
     # Pastikan semua key ada
@@ -23,6 +23,7 @@ def _load() -> dict:
     data.setdefault("codes", {})
     data.setdefault("orders", {})
     data.setdefault("settings", {})
+    data.setdefault("users", {})
     return data
 
 
@@ -299,3 +300,93 @@ def increment_sold_count(quantity: int = 1) -> int:
     db["settings"]["sold_count"] = current
     _save(db)
     return current
+
+# ================================================================
+# USERS (Untuk target Broadcast Message)
+# ================================================================
+def track_user(telegram_id: int, name: str = "", username: str = "") -> None:
+    """
+    Simpan/perbarui data user yang pernah berinteraksi dengan bot.
+    Dipanggil setiap kali user mengirim update agar broadcast punya target.
+    """
+    db = _load()
+    key = str(telegram_id)
+    now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+    users = db["users"]
+    if key in users:
+        users[key]["name"] = name or users[key].get("name", "")
+        users[key]["username"] = username or users[key].get("username", "")
+        users[key]["last_seen"] = now
+        users[key]["interactions"] = users[key].get("interactions", 0) + 1
+    else:
+        users[key] = {
+            "name": name,
+            "username": username,
+            "first_seen": now,
+            "last_seen": now,
+            "interactions": 1,
+        }
+
+    _save(db)
+
+def get_all_users() -> dict:
+    """Ambil semua user yang pernah tercatat."""
+    db = _load()
+    return db.get("users", {})
+
+def get_all_user_ids() -> set:
+    """Ambil semua telegram_id user yang tercatat (berupa int)."""
+    return {int(tid) for tid in get_all_users().keys() if str(tid).isdigit()}
+
+def get_all_reseller_ids() -> set:
+    """Ambil semua telegram_id reseller (berupa int)."""
+    return {int(tid) for tid in get_all_resellers().keys() if str(tid).isdigit()}
+
+def get_broadcast_targets(audience: str = "all") -> list:
+    """
+    Ambil daftar target broadcast.
+
+    Args:
+        audience: 'resellers' = hanya reseller,
+                  'all'       = semua user + reseller,
+                  'buyers'    = user yang pernah punya order
+    Return:
+        list telegram_id (int), unik, sudah diurutkan.
+    """
+    if audience == "resellers":
+        targets = get_all_reseller_ids()
+    elif audience == "buyers":
+        targets = {
+            int(o["telegram_id"])
+            for o in get_all_orders()
+            if str(o.get("telegram_id", "")).lstrip("-").isdigit()
+        }
+    else:  # 'all'
+        targets = get_all_user_ids() | get_all_reseller_ids()
+
+    return sorted(targets)
+
+# ================================================================
+# BROADCAST LOG
+# ================================================================
+def save_broadcast_log(audience: str, message: str, sent: int, failed: int) -> dict:
+    """Catat riwayat broadcast ke settings (maksimal 20 entri terakhir)."""
+    db = _load()
+    logs = db["settings"].get("broadcast_logs", [])
+    logs.append({
+        "audience": audience,
+        "message": message,
+        "sent": sent,
+        "failed": failed,
+        "total": sent + failed,
+        "sent_at": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+    })
+    db["settings"]["broadcast_logs"] = logs[-20:]
+    _save(db)
+    return logs[-1]
+
+def get_broadcast_logs() -> list:
+    """Ambil riwayat broadcast (terbaru di akhir)."""
+    db = _load()
+    return db["settings"].get("broadcast_logs", [])
