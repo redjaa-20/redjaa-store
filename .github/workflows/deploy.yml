@@ -1,0 +1,45 @@
+name: Deploy Telegram Bot
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script_stop: true
+
+          script: |
+            set -e
+
+            echo "================================="
+            echo "Deploying Redjaa Telegram Bot"
+            echo "================================="
+
+            cd /www/wwwroot/telegram-bot
+
+            echo "Pulling latest code..."
+            sudo -u www git pull origin main
+
+            echo "Updating Python dependencies..."
+            sudo -u www /www/wwwroot/telegram-bot/venv/bin/pip install \
+              -r /www/wwwroot/telegram-bot/requirements.txt
+
+            echo "Restarting bot..."
+            sudo systemctl restart redjaa-bot
+
+            echo "Checking bot status..."
+            sudo systemctl is-active --quiet redjaa-bot
+
+            echo "================================="
+            echo "Deployment successful!"
+            echo "================================="
